@@ -13,7 +13,7 @@ Una versione interattiva, moderna e mozzafiato in **React 18 + TypeScript + Vite
 ### 2. 🖐️ Controllo con i Gesti della Mano (Webcam AI)
 Basato sul modello ufficiale **Google MediaPipe Hand Landmarker** (in esecuzione 100% locale nel browser, massima privacy):
 - **Ruota l'albero nello spazio 3D**: muovi semplicemente la mano a destra o sinistra per far girare l'albero come per magia.
-- **Puntatore Magico**: la punta del tuo indice controlla un cursore fatato scintillante sullo schermo.
+- **Puntatore della mano**: segue la punta dell'indice e mostra la posa rilevata — mano aperta, pizzico o pugno chiuso.
 - **Pizzica (👌 Indice + Pollice)**: quando sei vicino a una foto polaroid, pizzica per aprirla ed espanderla a schermo intero!
 - **Pugno Chiuso (✊)**: chiude il modal della foto aperta.
 

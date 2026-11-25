@@ -5,6 +5,7 @@ import { HandGestureState } from '../types';
 
 interface Props {
   enabled: boolean;
+  visible: boolean;
   onToggle: () => void;
   onGesture: (state: HandGestureState) => void;
   gestureState: HandGestureState;
@@ -12,6 +13,7 @@ interface Props {
 
 export const HandTrackingWebcam: React.FC<Props> = ({
   enabled,
+  visible,
   onToggle,
   onGesture,
   gestureState,
@@ -49,7 +51,7 @@ export const HandTrackingWebcam: React.FC<Props> = ({
   if (!enabled) return null;
 
   return (
-    <div className="fixed bottom-4 right-4 z-40 font-sans pointer-events-auto">
+    <div className={`fixed bottom-4 right-4 z-40 font-sans pointer-events-auto ${visible ? '' : 'hidden'}`}>
       <div className="relative rounded-2xl bg-[#090e1c]/90 backdrop-blur-xl border border-cyan-400/30 p-2.5 shadow-[0_10px_35px_rgba(0,0,0,0.6),0_0_25px_rgba(0,240,255,0.2)] transition-all duration-300">
         {/* Top Header Bar */}
         <div className="flex items-center justify-between pb-2 mb-2 border-b border-white/10 text-xs text-white">

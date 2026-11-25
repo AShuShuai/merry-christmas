@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { Heart, Sparkles } from 'lucide-react';
+import { Heart } from 'lucide-react';
 import { MemoryPhoto, HandGestureState } from '../types';
 import { project } from '../engine/projection';
 import { chimeAudio } from '../utils/audio';
@@ -31,96 +31,117 @@ export const FloatingPhotosOverlay: React.FC<Props> = ({
 }) => {
   const lastPinchTimeRef = useRef<number>(0);
 
-  if (width === 0 || height === 0) return null;
-
   const cursorScreenX = gestureState.cursorX * width;
   const cursorScreenY = gestureState.cursorY * height;
 
-  // Find closest photo to hand cursor for gesture pinch trigger
-  let closestPhoto: MemoryPhoto | null = null;
-  let minCursorDist = Infinity;
+  let photoUnderCursor: MemoryPhoto | null = null;
+  let photoUnderCursorDepth = -Infinity;
 
   const projectedCards = photos.map((photo) => {
-    // In Chaos/scattered mode, photos expand outward for easy viewing
-    const effRadius = photo.radius * (1 + scatter * 0.4);
+    // Keep memories outside the tree silhouette, while letting them spread in chaos mode.
+    const effRadius = (photo.radius + 2.5) * (1 + scatter * 0.4);
     const px = Math.cos(photo.angle) * effRadius;
     const py = photo.y * (1 + scatter * 0.2);
     const pz = Math.sin(photo.angle) * effRadius;
 
     const proj = project(px, py, pz, yaw, pitch, width, height, focal);
 
+    const formedScale = Math.max(0.58, Math.min(0.92, proj.scale * 0.03));
+    const scale = formedScale * (1 - scatter * 0.35);
+    const screenX = Math.min(width - 82 * scale, Math.max(82 * scale, proj.x));
+    const screenY = Math.min(height - 92 * scale, Math.max(92 * scale, proj.y));
+
     // Front/back depth calculation
     const isFront = proj.z > -3.5;
-    const distToCursor = Math.hypot(proj.x - cursorScreenX, proj.y - cursorScreenY);
+    const isUnderCursor =
+      Math.abs(screenX - cursorScreenX) <= 78 * scale &&
+      Math.abs(screenY - cursorScreenY) <= 88 * scale;
 
-    if (distToCursor < minCursorDist && isFront) {
-      minCursorDist = distToCursor;
-      closestPhoto = photo;
+    if (isUnderCursor && isFront && proj.z > photoUnderCursorDepth) {
+      photoUnderCursor = photo;
+      photoUnderCursorDepth = proj.z;
     }
 
     return {
       photo,
       proj,
+      screenX,
+      screenY,
+      scale,
       isFront,
-      distToCursor,
+      isUnderCursor,
     };
-  });
+  }).sort((a, b) => a.proj.z - b.proj.z);
 
   // Handle gesture pinch opening the highlighted photo
   useEffect(() => {
     if (
+      width > 0 &&
+      height > 0 &&
+      gestureState.gesture === 'pinch' &&
       gestureState.isPinching &&
-      closestPhoto &&
-      minCursorDist < 120 &&
+      photoUnderCursor &&
       !activePhoto
     ) {
       const now = Date.now();
       if (now - lastPinchTimeRef.current > 1500) {
         lastPinchTimeRef.current = now;
         chimeAudio.playChime(1046.5, 0.15); // C6 bell chime
-        onSelectPhoto(closestPhoto);
+        onSelectPhoto(photoUnderCursor);
       }
     }
-  }, [gestureState.isPinching, closestPhoto, minCursorDist, onSelectPhoto, activePhoto]);
+  }, [width, height, gestureState.gesture, gestureState.isPinching, photoUnderCursor, onSelectPhoto, activePhoto]);
+
+  if (width === 0 || height === 0) return null;
 
   return (
     <div className="absolute inset-0 pointer-events-none overflow-hidden select-none">
-      {/* Virtual Hand Magic Wand Cursor */}
+      {/* Gesture cursor follows the index fingertip and mirrors the detected hand pose. */}
       {gestureState.hasHand && (
         <div
-          className="absolute pointer-events-none transform -translate-x-1/2 -translate-y-1/2 z-40 transition-transform duration-75"
+          className="absolute pointer-events-none transform -translate-x-1/2 -translate-y-1/2 z-40 transition-transform duration-150"
           style={{
             left: `${cursorScreenX}px`,
             top: `${cursorScreenY}px`,
           }}
         >
           <div
-            className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${
+            className={`w-10 h-10 rounded-full flex items-center justify-center border bg-slate-950/60 backdrop-blur-sm transition-all duration-150 ${
               gestureState.isPinching
-                ? 'bg-cyan-400/80 scale-125 shadow-[0_0_30px_#00f0ff]'
-                : 'bg-cyan-500/35 border-2 border-cyan-300 shadow-[0_0_15px_rgba(0,240,255,0.6)] animate-pulse'
+                ? 'border-cyan-200 scale-110'
+                : 'border-white/60'
             }`}
           >
-            <Sparkles
-              size={16}
-              className={`text-white transition-transform ${
-                gestureState.isPinching ? 'scale-125' : ''
-              }`}
-            />
+            <span
+              role="img"
+              aria-label={
+                gestureState.isPinching
+                  ? 'Pizzico'
+                  : gestureState.gesture === 'fist'
+                    ? 'Pugno chiuso'
+                    : 'Mano aperta'
+              }
+              className="text-[25px] leading-none transition-transform duration-150"
+            >
+              {gestureState.isPinching
+                ? '🤏'
+                : gestureState.gesture === 'fist'
+                  ? '✊'
+                  : '🖐️'}
+            </span>
           </div>
         </div>
       )}
 
       {/* 3D Floating Memory Polaroid Cards */}
-      {projectedCards.map(({ photo, proj, isFront, distToCursor }) => {
+      {projectedCards.map(({ photo, proj, screenX, screenY, scale: baseScale, isFront, isUnderCursor }) => {
         // If card is too far behind, hide or make deeply faded
         const opacity = isFront
           ? Math.min(1, Math.max(0.65, (proj.z + 8) / 14))
           : Math.max(0.18, (proj.z + 10) / 25);
 
-        const baseScale = Math.max(0.4, Math.min(1.25, proj.scale * 0.022 * (1 + scatter * 0.35)));
-        const isHoveredByHand = gestureState.hasHand && distToCursor < 90 && isFront;
-        const scale = isHoveredByHand ? baseScale * 1.22 : baseScale;
+        const isHoveredByHand = gestureState.hasHand && isUnderCursor && isFront;
+        const scale = isHoveredByHand ? baseScale * 1.12 : baseScale;
 
         return (
           <div
@@ -129,12 +150,12 @@ export const FloatingPhotosOverlay: React.FC<Props> = ({
               chimeAudio.playChime(1046.5, 0.15);
               onSelectPhoto(photo);
             }}
-            className={`absolute pointer-events-auto transform -translate-x-1/2 -translate-y-1/2 transition-all duration-200 cursor-pointer group ${
+            className={`absolute pointer-events-auto transform -translate-x-1/2 -translate-y-1/2 cursor-pointer group ${
               isFront ? 'z-20' : 'z-10'
             }`}
             style={{
-              left: `${proj.x}px`,
-              top: `${proj.y}px`,
+              left: `${screenX}px`,
+              top: `${screenY}px`,
               transform: `translate(-50%, -50%) scale(${scale})`,
               opacity,
             }}

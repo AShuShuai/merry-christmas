@@ -38,7 +38,7 @@ interface Props {
   onToggleWebcam: () => void;
 }
 
-export const ControlsPanel: React.FC<Props> = ({
+export const ControlsPanel = React.memo<Props>(({
   settings,
   onUpdateSettings,
   canvasRef,
@@ -725,4 +725,4 @@ export const ControlsPanel: React.FC<Props> = ({
       )}
     </>
   );
-};
+});

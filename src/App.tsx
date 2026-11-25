@@ -8,6 +8,71 @@ import { TreeSettings, HandGestureState, MemoryPhoto } from './types';
 import { DEFAULT_SETTINGS } from './config/themes';
 import { chimeAudio } from './utils/audio';
 
+interface ChristmasSceneProps {
+  settings: TreeSettings;
+  gestureState: HandGestureState;
+  canvasRef: React.MutableRefObject<CanvasHandle | null>;
+  selectedPhoto: MemoryPhoto | null;
+  onSelectPhoto: (photo: MemoryPhoto) => void;
+}
+
+const ChristmasScene = React.memo<ChristmasSceneProps>(({
+  settings,
+  gestureState,
+  canvasRef,
+  selectedPhoto,
+  onSelectPhoto,
+}) => {
+  const [cameraState, setCameraState] = useState({
+    yaw: 0,
+    pitch: 0,
+    width: 0,
+    height: 0,
+    focal: 800,
+    scatter: 0,
+  });
+
+  const handleCameraUpdate = useCallback(
+    (
+      yaw: number,
+      pitch: number,
+      width: number,
+      height: number,
+      focal: number,
+      scatter: number
+    ) => {
+      setCameraState({ yaw, pitch, width, height, focal, scatter });
+    },
+    []
+  );
+
+  return (
+    <>
+      <ChristmasTreeCanvas
+        ref={canvasRef}
+        settings={settings}
+        gestureDeltaX={settings.webcamEnabled && gestureState.hasHand ? gestureState.deltaX : 0}
+        gestureDeltaY={settings.webcamEnabled && gestureState.hasHand ? gestureState.deltaY : 0}
+        onCameraUpdate={handleCameraUpdate}
+      />
+      {settings.showPhotos && (
+        <FloatingPhotosOverlay
+          photos={settings.photos}
+          yaw={cameraState.yaw}
+          pitch={cameraState.pitch}
+          width={cameraState.width}
+          height={cameraState.height}
+          focal={cameraState.focal}
+          scatter={cameraState.scatter}
+          gestureState={gestureState}
+          onSelectPhoto={onSelectPhoto}
+          activePhoto={selectedPhoto}
+        />
+      )}
+    </>
+  );
+});
+
 export const App: React.FC = () => {
   const [settings, setSettings] = useState<TreeSettings>(() => {
     try {
@@ -26,16 +91,6 @@ export const App: React.FC = () => {
   const [isUiHidden, setIsUiHidden] = useState<boolean>(false);
   const canvasRef = useRef<CanvasHandle | null>(null);
 
-  // Camera projection state shared with 3D floating photos
-  const [cameraState, setCameraState] = useState({
-    yaw: 0,
-    pitch: 0,
-    width: 0,
-    height: 0,
-    focal: 800,
-    scatter: 0,
-  });
-
   // Hand Tracking Gesture State
   const [gestureState, setGestureState] = useState<HandGestureState>({
     hasHand: false,
@@ -47,6 +102,7 @@ export const App: React.FC = () => {
     pinchDistance: 1,
     isPinching: false,
   });
+  const previousGestureRef = useRef<HandGestureState['gesture']>('none');
 
   // Selected Memory Photo for Lightbox Modal
   const [selectedPhoto, setSelectedPhoto] = useState<MemoryPhoto | null>(null);
@@ -61,19 +117,19 @@ export const App: React.FC = () => {
   }, [settings]);
 
   // Audio Toggle
-  const handleToggleAudio = () => {
+  const handleToggleAudio = useCallback(() => {
     const nextState = !settings.musicEnabled;
     setSettings((prev) => ({ ...prev, musicEnabled: nextState }));
     chimeAudio.setLoop(nextState);
-  };
+  }, [settings.musicEnabled]);
 
   // Webcam Toggle
-  const handleToggleWebcam = () => {
+  const handleToggleWebcam = useCallback(() => {
     setSettings((prev) => ({ ...prev, webcamEnabled: !prev.webcamEnabled }));
-  };
+  }, []);
 
   // Fullscreen Toggle
-  const handleToggleFullscreen = () => {
+  const handleToggleFullscreen = useCallback(() => {
     if (!document.fullscreenElement) {
       document.documentElement.requestFullscreen().catch(() => {});
       setIsFullscreen(true);
@@ -81,7 +137,7 @@ export const App: React.FC = () => {
       document.exitFullscreen().catch(() => {});
       setIsFullscreen(false);
     }
-  };
+  }, []);
 
   // Hotkey 'H' to hide/show UI for clean recording / full immersion
   useEffect(() => {
@@ -105,27 +161,14 @@ export const App: React.FC = () => {
     return () => document.removeEventListener('fullscreenchange', onFsChange);
   }, []);
 
-  // Camera broadcast from canvas render loop
-  const handleCameraUpdate = useCallback(
-    (
-      yaw: number,
-      pitch: number,
-      width: number,
-      height: number,
-      focal: number,
-      scatter: number
-    ) => {
-      setCameraState({ yaw, pitch, width, height, focal, scatter });
-    },
-    []
-  );
-
   // Gesture callback from MediaPipe hand tracker
   const handleGestureUpdate = useCallback((st: HandGestureState) => {
+    const previousGesture = previousGestureRef.current;
+    previousGestureRef.current = st.gesture;
     setGestureState(st);
 
-    // Open Palm 🖐️: Disperse tree into floating cloud of polaroid memories (Chaos Mode)
-    if (st.gesture === 'open_palm') {
+    // Opening the hand disperses the tree; releasing a fist reverses the formation.
+    if (st.gesture === 'open_palm' || (previousGesture === 'fist' && st.gesture !== 'fist')) {
       setSettings((prev) => (prev.treeState !== 'dispersed' ? { ...prev, treeState: 'dispersed' } : prev));
     }
 
@@ -138,40 +181,22 @@ export const App: React.FC = () => {
 
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-[#02050c] select-none">
-      {/* 3D Canvas Scene */}
-      <ChristmasTreeCanvas
-        ref={canvasRef}
+      <ChristmasScene
         settings={settings}
-        gestureDeltaX={settings.webcamEnabled && gestureState.hasHand ? gestureState.deltaX : 0}
-        gestureDeltaY={settings.webcamEnabled && gestureState.hasHand ? gestureState.deltaY : 0}
-        onCameraUpdate={handleCameraUpdate}
+        gestureState={gestureState}
+        canvasRef={canvasRef}
+        selectedPhoto={selectedPhoto}
+        onSelectPhoto={setSelectedPhoto}
       />
 
-      {/* 3D Floating Memory Polaroids Overlay */}
-      {settings.showPhotos && (
-        <FloatingPhotosOverlay
-          photos={settings.photos}
-          yaw={cameraState.yaw}
-          pitch={cameraState.pitch}
-          width={cameraState.width}
-          height={cameraState.height}
-          focal={cameraState.focal}
-          scatter={cameraState.scatter}
-          gestureState={gestureState}
-          onSelectPhoto={setSelectedPhoto}
-          activePhoto={selectedPhoto}
-        />
-      )}
-
-      {/* Webcam Hand Tracking PIP Widget */}
-      {!isUiHidden && (
-        <HandTrackingWebcam
-          enabled={settings.webcamEnabled}
-          onToggle={handleToggleWebcam}
-          onGesture={handleGestureUpdate}
-          gestureState={gestureState}
-        />
-      )}
+      {/* Keep the tracker mounted while the UI is hidden to avoid restarting the camera. */}
+      <HandTrackingWebcam
+        enabled={settings.webcamEnabled}
+        visible={!isUiHidden}
+        onToggle={handleToggleWebcam}
+        onGesture={handleGestureUpdate}
+        gestureState={gestureState}
+      />
 
       {/* Floating Controls Overlay */}
       {!isUiHidden && (

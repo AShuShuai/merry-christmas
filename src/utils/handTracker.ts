@@ -3,11 +3,15 @@ import { HandGestureState } from '../types';
 
 export type GestureCallback = (state: HandGestureState) => void;
 
+type InitResult = 'ready' | 'cancelled' | 'failed';
+
 class HandTrackerEngine {
   private handLandmarker: HandLandmarker | null = null;
-  private isInitializing: boolean = false;
   private isRunning: boolean = false;
   private animFrameId: number | null = null;
+  private lastVideoTime: number = -1;
+  private generation: number = 0;
+  private initPromise: Promise<InitResult> | null = null;
 
   private videoEl: HTMLVideoElement | null = null;
   private canvasEl: HTMLCanvasElement | null = null;
@@ -18,35 +22,71 @@ class HandTrackerEngine {
   private smoothDeltaX: number = 0;
   private smoothDeltaY: number = 0;
 
-  public async init(
+  public init(
     video: HTMLVideoElement,
     canvas: HTMLCanvasElement,
     onGesture: GestureCallback
   ): Promise<boolean> {
-    if (this.isInitializing) return false;
-    this.isInitializing = true;
+    if (this.isRunning) {
+      this.onGestureCallback = onGesture;
+      return Promise.resolve(true);
+    }
+
+    if (this.initPromise) {
+      return this.initPromise.then((result) => {
+        if (result === 'failed') return false;
+        if (result === 'ready' && this.isRunning) {
+          this.onGestureCallback = onGesture;
+          return true;
+        }
+        return this.init(video, canvas, onGesture);
+      });
+    }
+
+    const initialization = this.initialize(video, canvas, onGesture);
+    const queuedInitialization = initialization.then((result) => {
+      if (this.initPromise === queuedInitialization) this.initPromise = null;
+      return result;
+    });
+    this.initPromise = queuedInitialization;
+
+    return queuedInitialization.then((result) => result === 'ready');
+  }
+
+  private async initialize(
+    video: HTMLVideoElement,
+    canvas: HTMLCanvasElement,
+    onGesture: GestureCallback
+  ): Promise<InitResult> {
+    const generation = ++this.generation;
     this.videoEl = video;
     this.canvasEl = canvas;
     this.onGestureCallback = onGesture;
+    this.lastVideoTime = -1;
 
     try {
-      // 1. Load MediaPipe WASM from official fast CDN
-      const vision = await FilesetResolver.forVisionTasks(
-        'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/wasm'
-      );
+      if (!this.handLandmarker) {
+        const vision = await FilesetResolver.forVisionTasks(
+          'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/wasm'
+        );
+        const landmarker = await HandLandmarker.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath:
+              'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
+            delegate: 'GPU',
+          },
+          runningMode: 'VIDEO',
+          numHands: 1,
+        });
 
-      // 2. Create HandLandmarker instance with GPU delegate if supported
-      this.handLandmarker = await HandLandmarker.createFromOptions(vision, {
-        baseOptions: {
-          modelAssetPath:
-            'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
-          delegate: 'GPU',
-        },
-        runningMode: 'VIDEO',
-        numHands: 1,
-      });
+        if (generation !== this.generation) {
+          landmarker.close();
+          return 'cancelled';
+        }
 
-      // 3. Request user webcam stream
+        this.handLandmarker = landmarker;
+      }
+
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           width: { ideal: 640 },
@@ -55,27 +95,39 @@ class HandTrackerEngine {
         },
       });
 
-      this.videoEl.srcObject = stream;
+      if (generation !== this.generation) {
+        stream.getTracks().forEach((track) => track.stop());
+        return 'cancelled';
+      }
+
+      video.srcObject = stream;
       await new Promise<void>((resolve) => {
-        if (!this.videoEl) return resolve();
-        this.videoEl.onloadedmetadata = () => {
-          this.videoEl?.play().then(() => resolve()).catch(() => resolve());
+        const playVideo = () => {
+          video.play().then(() => resolve()).catch(() => resolve());
         };
+        if (video.readyState >= 1) playVideo();
+        else video.onloadedmetadata = playVideo;
       });
 
+      if (generation !== this.generation) {
+        stream.getTracks().forEach((track) => track.stop());
+        video.srcObject = null;
+        return 'cancelled';
+      }
+
       this.isRunning = true;
-      this.isInitializing = false;
       this.startLoop();
-      return true;
+      return 'ready';
     } catch (err) {
+      if (generation !== this.generation) return 'cancelled';
       console.error('HandTracker init error:', err);
-      this.isInitializing = false;
       this.stop();
-      return false;
+      return 'failed';
     }
   }
 
   public stop() {
+    this.generation += 1;
     this.isRunning = false;
     if (this.animFrameId) {
       cancelAnimationFrame(this.animFrameId);
@@ -86,12 +138,14 @@ class HandTrackerEngine {
       stream.getTracks().forEach((track) => track.stop());
       this.videoEl.srcObject = null;
     }
+    if (this.videoEl) this.videoEl.onloadedmetadata = null;
     if (this.canvasEl) {
       const ctx = this.canvasEl.getContext('2d');
       ctx?.clearRect(0, 0, this.canvasEl.width, this.canvasEl.height);
     }
     this.lastHandX = null;
     this.lastHandY = null;
+    this.lastVideoTime = -1;
     this.smoothDeltaX = 0;
     this.smoothDeltaY = 0;
   }
@@ -100,7 +154,8 @@ class HandTrackerEngine {
     const loop = () => {
       if (!this.isRunning || !this.videoEl || !this.handLandmarker) return;
 
-      if (this.videoEl.readyState >= 2) {
+      if (this.videoEl.readyState >= 2 && this.videoEl.currentTime !== this.lastVideoTime) {
+        this.lastVideoTime = this.videoEl.currentTime;
         const nowInMs = performance.now();
         const results: HandLandmarkerResult = this.handLandmarker.detectForVideo(
           this.videoEl,
@@ -186,8 +241,6 @@ class HandTrackerEngine {
 
     // 1. Pinch detection (Index Tip 8 to Thumb Tip 4)
     const pinchDist = Math.hypot(thumb.x - indexTip.x, thumb.y - indexTip.y);
-    const isPinching = pinchDist < 0.075;
-
     // 2. Open palm vs Fist
     // An open finger has its tip further from the wrist than its pip joint (index: 8 vs 6, middle: 12 vs 10, etc.)
     const isIndexOpen = Math.hypot(indexTip.x - wrist.x, indexTip.y - wrist.y) > Math.hypot(landmarks[6].x - wrist.x, landmarks[6].y - wrist.y);
@@ -195,13 +248,16 @@ class HandTrackerEngine {
     const isRingOpen = Math.hypot(ringTip.x - wrist.x, ringTip.y - wrist.y) > Math.hypot(landmarks[14].x - wrist.x, landmarks[14].y - wrist.y);
     const isPinkyOpen = Math.hypot(pinkyTip.x - wrist.x, pinkyTip.y - wrist.y) > Math.hypot(landmarks[18].x - wrist.x, landmarks[18].y - wrist.y);
 
+    const isFist = !isIndexOpen && !isMiddleOpen && !isRingOpen && !isPinkyOpen;
+    const isPinching = pinchDist < 0.075 && isIndexOpen && !isFist;
+
     let gesture: HandGestureState['gesture'] = 'move';
-    if (isPinching) {
+    if (isFist) {
+      gesture = 'fist';
+    } else if (isPinching) {
       gesture = 'pinch';
     } else if (isIndexOpen && isMiddleOpen && isRingOpen && isPinkyOpen) {
       gesture = 'open_palm';
-    } else if (!isIndexOpen && !isMiddleOpen && !isRingOpen && !isPinkyOpen) {
-      gesture = 'fist';
     }
 
     // Draw Skeleton on PIP Canvas

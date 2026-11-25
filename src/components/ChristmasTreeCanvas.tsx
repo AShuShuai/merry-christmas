@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useCallback, useImperativeHandle, forwardRef 
 import { TreeSettings, TreePoint, OrbitPoint, Sparkle, Petal, Meteor, BurstParticle } from '../types';
 import { THEMES } from '../config/themes';
 import { generateSprites } from '../engine/sprites';
-import { project } from '../engine/projection';
+import { createProjector } from '../engine/projection';
 import { chimeAudio } from '../utils/audio';
 
 const TAU = Math.PI * 2;
@@ -39,7 +39,7 @@ interface Props {
   ) => void;
 }
 
-export const ChristmasTreeCanvas = forwardRef<CanvasHandle, Props>(
+export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
   ({ settings, gestureDeltaX = 0, gestureDeltaY = 0, onCameraUpdate }, ref) => {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -198,7 +198,7 @@ export const ChristmasTreeCanvas = forwardRef<CanvasHandle, Props>(
 
     const w = window.innerWidth;
     const h = window.innerHeight;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
 
     cv.width = Math.floor(w * dpr);
     cv.height = Math.floor(h * dpr);
@@ -214,7 +214,7 @@ export const ChristmasTreeCanvas = forwardRef<CanvasHandle, Props>(
       w,
       h,
       dpr,
-      focal: Math.max(760, h * 1.3),
+      focal: Math.max(760, h * 1.3) * 0.82,
     };
 
     rebuildScene();
@@ -312,9 +312,10 @@ export const ChristmasTreeCanvas = forwardRef<CanvasHandle, Props>(
     handleResize();
     window.addEventListener('resize', handleResize);
 
-    const now = performance.now();
-    startTimeRef.current = now;
-    introStartRef.current = 0;
+    if (startTimeRef.current === 0) {
+      startTimeRef.current = performance.now();
+      introStartRef.current = 0;
+    }
     lastTimeRef.current = 0;
 
     const render = () => {
@@ -339,6 +340,7 @@ export const ChristmasTreeCanvas = forwardRef<CanvasHandle, Props>(
       // Apply AI hand gesture rotation
       const gDx = gestureRef.current.dx;
       const gDy = gestureRef.current.dy;
+      gestureRef.current = { dx: 0, dy: 0 };
       if (gDx !== 0) {
         manualRotRef.current.yaw += gDx * 4.5;
       }
@@ -354,6 +356,7 @@ export const ChristmasTreeCanvas = forwardRef<CanvasHandle, Props>(
       const autoAngle = settings.autoRotate ? time * settings.rotationSpeed + Math.sin(time * 0.4) * 0.1 : 0;
       const yaw = autoAngle + manualRotRef.current.yaw;
       const pitch = manualRotRef.current.pitch;
+      const projectFrame = createProjector(yaw, pitch, w, h, effFocal);
 
       // Chaos vs Formed scatter factor (smooth spring interpolation)
       const targetScatter = settings.treeState === 'dispersed' ? 1 : 0;
@@ -427,7 +430,7 @@ export const ChristmasTreeCanvas = forwardRef<CanvasHandle, Props>(
 
       // 4. Ground Glow
       if (settings.showGroundGlow) {
-        const pGlow = project(0, -10.2, 0, yaw, pitch, w, h, effFocal);
+        const pGlow = projectFrame(0, -10.2, 0);
         ctx.save();
         ctx.globalCompositeOperation = 'lighter';
         ctx.translate(w / 2, pGlow.y);
@@ -459,7 +462,7 @@ export const ChristmasTreeCanvas = forwardRef<CanvasHandle, Props>(
         const curY = pt.y * (1 - scatter) + pt.cy * scatter;
         const curZ = pt.z * (1 - scatter) + pt.cz * scatter;
 
-        const p = project(curX * breathe, curY, curZ * breathe, yaw, pitch, w, h, effFocal);
+        const p = projectFrame(curX * breathe, curY, curZ * breathe);
         const px = w / 2 + (p.x - w / 2) * intro;
         const py = h / 2 + (p.y - h / 2) * intro;
         let cx = pt.sx + (px - pt.sx) * intro;
@@ -493,7 +496,7 @@ export const ChristmasTreeCanvas = forwardRef<CanvasHandle, Props>(
           const o = orbits[i];
           const a = o.a0 + time * o.spd;
           const yy = o.y + Math.sin(time * o.ws + o.ph) * 0.6;
-          const p = project(Math.cos(a) * o.r, yy, Math.sin(a) * o.r, yaw, pitch, w, h, effFocal);
+          const p = projectFrame(Math.cos(a) * o.r, yy, Math.sin(a) * o.r);
           const tw = 0.5 + 0.5 * Math.sin(time * 3 + o.ph);
           const size = o.size * p.scale * (0.8 + 0.5 * tw);
           ctx.globalAlpha = (0.35 + 0.5 * tw) * 0.85;
@@ -529,7 +532,7 @@ export const ChristmasTreeCanvas = forwardRef<CanvasHandle, Props>(
 
       // 8. Top Star
       if (settings.showStar) {
-        const pStar = project(0, 7.7 + scatter * 2.5, 0, yaw, pitch, w, h, effFocal);
+        const pStar = projectFrame(0, 7.7 + scatter * 2.5, 0);
         const pulse = 1 + 0.14 * Math.sin(time * 3.2);
         ctx.save();
         ctx.globalCompositeOperation = 'lighter';
@@ -673,6 +676,6 @@ export const ChristmasTreeCanvas = forwardRef<CanvasHandle, Props>(
       className="fixed inset-0 w-full h-full block cursor-grab active:cursor-grabbing select-none touch-none"
     />
   );
-});
+}));
 
 ChristmasTreeCanvas.displayName = 'ChristmasTreeCanvas';
