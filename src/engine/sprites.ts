@@ -1,0 +1,24 @@
+import { ColorRGB } from '../types';
+
+export function makeSprite(rgb: ColorRGB, size: number = 64): HTMLCanvasElement {
+  const cv = document.createElement('canvas');
+  cv.width = size;
+  cv.height = size;
+  const g = cv.getContext('2d');
+  if (!g) return cv;
+
+  const half = size / 2;
+  const grad = g.createRadialGradient(half, half, 0, half, half, half);
+  grad.addColorStop(0, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.13, `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0.95)`);
+  grad.addColorStop(0.38, `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0.3)`);
+  grad.addColorStop(1, `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0)`);
+
+  g.fillStyle = grad;
+  g.fillRect(0, 0, size, size);
+  return cv;
+}
+
+export function generateSprites(palette: ColorRGB[]): HTMLCanvasElement[] {
+  return palette.map((color) => makeSprite(color));
+}
