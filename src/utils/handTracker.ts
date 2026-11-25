@@ -4,6 +4,37 @@ import { HandGestureState } from '../types';
 export type GestureCallback = (state: HandGestureState) => void;
 
 type InitResult = 'ready' | 'cancelled' | 'failed';
+type HandLandmark = { x: number; y: number; z?: number };
+
+function landmarkDistance(a: HandLandmark, b: HandLandmark): number {
+  return Math.hypot(a.x - b.x, a.y - b.y, (a.z ?? 0) - (b.z ?? 0));
+}
+
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
+
+function fingerExtension(
+  wrist: HandLandmark,
+  mcp: HandLandmark,
+  pip: HandLandmark,
+  tip: HandLandmark
+): number {
+  const first = { x: mcp.x - pip.x, y: mcp.y - pip.y, z: (mcp.z ?? 0) - (pip.z ?? 0) };
+  const second = { x: tip.x - pip.x, y: tip.y - pip.y, z: (tip.z ?? 0) - (pip.z ?? 0) };
+  const lengths = landmarkDistance(first, { x: 0, y: 0, z: 0 }) *
+    landmarkDistance(second, { x: 0, y: 0, z: 0 });
+  const dot = first.x * second.x + first.y * second.y + first.z * second.z;
+  const angle = lengths > 0
+    ? Math.acos(Math.max(-1, Math.min(1, dot / lengths))) * 180 / Math.PI
+    : 0;
+  const angleExtension = clamp01((angle - 60) / 82);
+  const mcpDistance = landmarkDistance(mcp, wrist);
+  const reachRatio = landmarkDistance(tip, wrist) / Math.max(mcpDistance, 0.0001);
+  const reachExtension = clamp01((reachRatio - 1.08) / 0.55);
+
+  return clamp01(angleExtension * 0.7 + reachExtension * 0.3);
+}
 
 class HandTrackerEngine {
   private handLandmarker: HandLandmarker | null = null;
@@ -24,6 +55,7 @@ class HandTrackerEngine {
   private smoothCursorY: number | null = null;
   private isPinching: boolean = false;
   private smoothedPinchDistance: number | null = null;
+  private pinchLastStrictTime: number = 0;
   private pinchStartFrames: number = 0;
   private pinchReleaseFrames: number = 0;
   private smoothDeltaX: number = 0;
@@ -158,6 +190,7 @@ class HandTrackerEngine {
     this.smoothCursorY = null;
     this.isPinching = false;
     this.smoothedPinchDistance = null;
+    this.pinchLastStrictTime = 0;
     this.pinchStartFrames = 0;
     this.pinchReleaseFrames = 0;
     this.lastVideoTime = -1;
@@ -208,6 +241,7 @@ class HandTrackerEngine {
       this.smoothCursorY = null;
       this.isPinching = false;
       this.smoothedPinchDistance = null;
+      this.pinchLastStrictTime = 0;
       this.pinchStartFrames = 0;
       this.pinchReleaseFrames = 0;
       this.smoothDeltaX = 0;
@@ -278,41 +312,45 @@ class HandTrackerEngine {
     this.lastHandX = currentHandX;
     this.lastHandY = currentHandY;
 
-    // Measure the pinch against palm width so detection is independent of camera distance.
-    const pinchDist = Math.hypot(thumb.x - indexTip.x, thumb.y - indexTip.y);
-    const palmWidth = Math.hypot(
-      landmarks[5].x - landmarks[17].x,
-      landmarks[5].y - landmarks[17].y
-    );
-    const rawNormalizedPinchDistance = pinchDist / Math.max(palmWidth, 0.001);
+    // Normalize fingertip distance by palm length so pinch thresholds adapt to hand size.
+    const palmLength = landmarkDistance(wrist, landmarks[9]);
+    const rawNormalizedPinchDistance =
+      landmarkDistance(thumb, indexTip) / Math.max(palmLength, 0.001);
     this.smoothedPinchDistance = this.smoothedPinchDistance === null
       ? rawNormalizedPinchDistance
       : this.smoothedPinchDistance +
-        (rawNormalizedPinchDistance - this.smoothedPinchDistance) * 0.55;
+        (rawNormalizedPinchDistance - this.smoothedPinchDistance) * 0.65;
     const normalizedPinchDistance = this.smoothedPinchDistance;
-    // 2. Open palm vs Fist
-    // An open finger has its tip further from the wrist than its pip joint (index: 8 vs 6, middle: 12 vs 10, etc.)
-    const isIndexOpen = Math.hypot(indexTip.x - wrist.x, indexTip.y - wrist.y) > Math.hypot(landmarks[6].x - wrist.x, landmarks[6].y - wrist.y);
-    const isMiddleOpen = Math.hypot(middleTip.x - wrist.x, middleTip.y - wrist.y) > Math.hypot(landmarks[10].x - wrist.x, landmarks[10].y - wrist.y);
-    const isRingOpen = Math.hypot(ringTip.x - wrist.x, ringTip.y - wrist.y) > Math.hypot(landmarks[14].x - wrist.x, landmarks[14].y - wrist.y);
-    const isPinkyOpen = Math.hypot(pinkyTip.x - wrist.x, pinkyTip.y - wrist.y) > Math.hypot(landmarks[18].x - wrist.x, landmarks[18].y - wrist.y);
-
-    const fingersClosed = !isIndexOpen && !isMiddleOpen && !isRingOpen && !isPinkyOpen;
+    const extensions = [
+      fingerExtension(wrist, landmarks[5], landmarks[6], indexTip),
+      fingerExtension(wrist, landmarks[9], landmarks[10], middleTip),
+      fingerExtension(wrist, landmarks[13], landmarks[14], ringTip),
+      fingerExtension(wrist, landmarks[17], landmarks[18], pinkyTip),
+    ];
+    const otherFingersAverage = (extensions[1] + extensions[2] + extensions[3]) / 3;
+    const fingersClosed = extensions.every((extension) => extension < 0.36);
+    const otherFingersCurled = otherFingersAverage < 0.34;
     const pinchCandidate =
-      isIndexOpen &&
-      normalizedPinchDistance < 0.48;
+      normalizedPinchDistance < 0.42 &&
+      !otherFingersCurled;
     const isFist = fingersClosed && !pinchCandidate;
 
     if (isFist) {
       this.isPinching = false;
+      this.pinchLastStrictTime = 0;
       this.pinchStartFrames = 0;
       this.pinchReleaseFrames = 0;
     } else if (this.isPinching) {
-      this.pinchReleaseFrames = normalizedPinchDistance > 0.58 || !isIndexOpen
-        ? this.pinchReleaseFrames + 1
-        : 0;
+      const now = performance.now();
+      if (pinchCandidate) this.pinchLastStrictTime = now;
+      const remainsPinched =
+        normalizedPinchDistance < 0.58 &&
+        !otherFingersCurled &&
+        now - this.pinchLastStrictTime <= 180;
+      this.pinchReleaseFrames = remainsPinched ? 0 : this.pinchReleaseFrames + 1;
       if (this.pinchReleaseFrames >= 2) {
         this.isPinching = false;
+        this.pinchLastStrictTime = 0;
         this.pinchReleaseFrames = 0;
       }
     } else {
@@ -321,6 +359,7 @@ class HandTrackerEngine {
         : 0;
       if (this.pinchStartFrames >= 2) {
         this.isPinching = true;
+        this.pinchLastStrictTime = performance.now();
         this.pinchStartFrames = 0;
         this.pinchReleaseFrames = 0;
       }
@@ -332,7 +371,7 @@ class HandTrackerEngine {
       gesture = 'fist';
     } else if (isPinching) {
       gesture = 'pinch';
-    } else if (isIndexOpen && isMiddleOpen && isRingOpen && isPinkyOpen) {
+    } else if (extensions.every((extension) => extension > 0.5)) {
       gesture = 'open_palm';
     }
 
