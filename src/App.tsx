@@ -84,7 +84,11 @@ export const App: React.FC = () => {
     try {
       const saved = localStorage.getItem(SETTINGS_STORAGE_KEY);
       if (saved) {
-        return { ...DEFAULT_SETTINGS, ...JSON.parse(saved) };
+        return {
+          ...DEFAULT_SETTINGS,
+          ...JSON.parse(saved),
+          treeState: 'dispersed',
+        };
       }
       for (const storageKey of PREVIOUS_SETTINGS_STORAGE_KEYS) {
         const previousSettings = localStorage.getItem(storageKey);
@@ -181,8 +185,8 @@ export const App: React.FC = () => {
   const handleGestureUpdate = useCallback((st: HandGestureState) => {
     setGestureState(st);
 
-    // A deliberate open-palm gesture disperses the tree; losing hand tracking does not.
-    if (st.gesture === 'open_palm') {
+    // Keep the tree dispersed whenever no hand is detected.
+    if (!st.hasHand || st.gesture === 'open_palm') {
       setSettings((prev) => (prev.treeState !== 'dispersed' ? { ...prev, treeState: 'dispersed' } : prev));
     }
 

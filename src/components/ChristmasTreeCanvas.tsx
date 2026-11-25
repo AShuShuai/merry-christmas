@@ -45,6 +45,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
 
     // Chaos vs Formed scatter factor (0 = formed tree, 1 = dispersed galaxy)
     const scatterRef = useRef<number>(0);
+    const starSequenceRef = useRef<number>(0);
     const zoomRef = useRef<number>(1.0);
 
   // Scene points refs
@@ -342,12 +343,12 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
       const gDy = gestureRef.current.dy;
       gestureRef.current = { dx: 0, dy: 0 };
       if (gDx !== 0) {
-        manualRotRef.current.yaw += gDx * 4.5;
+        manualRotRef.current.yaw += gDx * 3.2;
       }
       if (gDy !== 0) {
         manualRotRef.current.pitch = Math.max(
           -0.45,
-          Math.min(0.45, manualRotRef.current.pitch - gDy * 3.0)
+          Math.min(0.45, manualRotRef.current.pitch - gDy * 2.2)
         );
       }
 
@@ -362,6 +363,11 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
       const targetScatter = settings.treeState === 'dispersed' ? 1 : 0;
       scatterRef.current += (targetScatter - scatterRef.current) * 0.06;
       const scatter = scatterRef.current;
+      if (settings.treeState !== 'formed' || !settings.showStar) {
+        starSequenceRef.current = 0;
+      } else if (scatter < 0.06 && intro >= 0.995) {
+        starSequenceRef.current += dt;
+      }
 
       // Broadcast camera and scatter state to 3D floating photos overlay
       onCameraUpdateRef.current?.(yaw, pitch, w, h, effFocal, scatter);
@@ -561,14 +567,60 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         }
       }
 
-      // 8. Top Star
-      if (settings.showStar) {
-        const pStar = projectFrame(0, 7.7 + scatter * 2.5, 0);
+      // 8. Gather light from the roots toward the treetop, then reveal the top star.
+      const starSequenceTime = starSequenceRef.current;
+      const gatherDuration = 1.0;
+      if (
+        settings.showStar &&
+        settings.treeState === 'formed' &&
+        starSequenceTime > 0 &&
+        starSequenceTime < gatherDuration
+      ) {
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.shadowColor = '#fff2a6';
+        ctx.shadowBlur = 9;
+        const moteCount = 26;
+        const launchSpan = 0.5;
+        const travelDuration = 0.48;
+        for (let i = 0; i < moteCount; i++) {
+          const launchTime = (i / (moteCount - 1)) * launchSpan;
+          const age = starSequenceTime - launchTime;
+          if (age < 0 || age > travelDuration) continue;
+
+          const travel = age / travelDuration;
+          const easedTravel = 1 - Math.pow(1 - travel, 2);
+          const treeProgress = easedTravel;
+          const treeRadius = 6.9 * Math.pow(1 - treeProgress, 0.85) + 0.45;
+          const angle = i * 2.399 + time * 0.7;
+          const orbitRadius = treeRadius * (0.72 + 0.12 * Math.sin(age * 13 + i));
+          const moteY = -9 + treeProgress * 16.7;
+          const mote = projectFrame(
+            Math.cos(angle) * orbitRadius,
+            moteY,
+            Math.sin(angle) * orbitRadius
+          );
+          const fadeIn = Math.min(1, age / 0.12);
+          const fadeOut = Math.min(1, (travelDuration - age) / 0.12);
+          const size = Math.max(2, mote.scale * 0.13);
+
+          ctx.globalAlpha = Math.max(0, Math.min(fadeIn, fadeOut)) * (0.75 + 0.25 * Math.sin(time * 10 + i));
+          ctx.drawImage(sprites[0], mote.x - size / 2, mote.y - size / 2, size, size);
+        }
+        ctx.restore();
+      }
+
+      const starAppearDuration = 0.35;
+      const starReveal = Math.max(0, Math.min(1, (starSequenceTime - gatherDuration) / starAppearDuration));
+      if (settings.showStar && settings.treeState === 'formed' && starReveal > 0) {
+        const appearScale = 0.2 + 0.8 * (1 - Math.pow(1 - starReveal, 3));
+        const pStar = projectFrame(0, 7.7, 0);
         const pulse = 1 + 0.14 * Math.sin(time * 3.2);
         ctx.save();
         ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = starReveal;
         ctx.translate(pStar.x, pStar.y);
-        ctx.scale(pulse, pulse);
+        ctx.scale(pulse * appearScale, pulse * appearScale);
 
         const R = effFocal * 0.22;
         const gStar = ctx.createRadialGradient(0, 0, 0, 0, 0, R);
@@ -576,7 +628,6 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         gStar.addColorStop(0.12, currentTheme.star.mid);
         gStar.addColorStop(0.4, currentTheme.star.outer);
         gStar.addColorStop(1, 'rgba(0,0,0,0)');
-        ctx.globalAlpha = 1;
         ctx.fillStyle = gStar;
         ctx.beginPath();
         ctx.arc(0, 0, R, 0, TAU);

@@ -19,6 +19,8 @@ class HandTrackerEngine {
 
   private lastHandX: number | null = null;
   private lastHandY: number | null = null;
+  private smoothCursorX: number | null = null;
+  private smoothCursorY: number | null = null;
   private isPinching: boolean = false;
   private smoothDeltaX: number = 0;
   private smoothDeltaY: number = 0;
@@ -146,6 +148,8 @@ class HandTrackerEngine {
     }
     this.lastHandX = null;
     this.lastHandY = null;
+    this.smoothCursorX = null;
+    this.smoothCursorY = null;
     this.isPinching = false;
     this.lastVideoTime = -1;
     this.smoothDeltaX = 0;
@@ -185,9 +189,11 @@ class HandTrackerEngine {
       // No hand detected
       this.lastHandX = null;
       this.lastHandY = null;
+      this.smoothCursorX = null;
+      this.smoothCursorY = null;
       this.isPinching = false;
-      this.smoothDeltaX *= 0.8;
-      this.smoothDeltaY *= 0.8;
+      this.smoothDeltaX = 0;
+      this.smoothDeltaY = 0;
 
       this.onGestureCallback?.({
         hasHand: false,
@@ -219,12 +225,21 @@ class HandTrackerEngine {
     const pinkyTip = landmarks[20];
 
     // Screen cursor coords (Mirroring X for intuitive selfie interaction)
-    const cursorX = 1 - (indexTip.x + thumb.x) / 2;
-    const cursorY = (indexTip.y + thumb.y) / 2;
+    const rawCursorX = 1 - (indexTip.x + thumb.x) / 2;
+    const rawCursorY = (indexTip.y + thumb.y) / 2;
+    const cursorSmoothing = 0.48;
+    this.smoothCursorX = this.smoothCursorX === null
+      ? rawCursorX
+      : this.smoothCursorX + (rawCursorX - this.smoothCursorX) * cursorSmoothing;
+    this.smoothCursorY = this.smoothCursorY === null
+      ? rawCursorY
+      : this.smoothCursorY + (rawCursorY - this.smoothCursorY) * cursorSmoothing;
+    const cursorX = this.smoothCursorX;
+    const cursorY = this.smoothCursorY;
 
-    // Movement delta tracking for 3D rotation (tracking palm/wrist)
-    const currentHandX = 1 - wrist.x;
-    const currentHandY = wrist.y;
+    // Use the palm center rather than the wrist to reduce rotation jitter.
+    const currentHandX = 1 - (wrist.x + landmarks[5].x + landmarks[9].x + landmarks[13].x + landmarks[17].x) / 5;
+    const currentHandY = (wrist.y + landmarks[5].y + landmarks[9].y + landmarks[13].y + landmarks[17].y) / 5;
 
     let deltaX = 0;
     let deltaY = 0;
@@ -232,9 +247,12 @@ class HandTrackerEngine {
     if (this.lastHandX !== null && this.lastHandY !== null) {
       const rawDeltaX = currentHandX - this.lastHandX;
       const rawDeltaY = currentHandY - this.lastHandY;
-      // Exponential smoothing for buttery smooth rotation
-      this.smoothDeltaX = this.smoothDeltaX * 0.6 + rawDeltaX * 0.4;
-      this.smoothDeltaY = this.smoothDeltaY * 0.6 + rawDeltaY * 0.4;
+      const filteredDeltaX = Math.abs(rawDeltaX) < 0.0025 ? 0 : rawDeltaX;
+      const filteredDeltaY = Math.abs(rawDeltaY) < 0.0025 ? 0 : rawDeltaY;
+      this.smoothDeltaX = this.smoothDeltaX * 0.35 + filteredDeltaX * 0.65;
+      this.smoothDeltaY = this.smoothDeltaY * 0.35 + filteredDeltaY * 0.65;
+      this.smoothDeltaX = Math.max(-0.025, Math.min(0.025, this.smoothDeltaX));
+      this.smoothDeltaY = Math.max(-0.025, Math.min(0.025, this.smoothDeltaY));
       deltaX = this.smoothDeltaX;
       deltaY = this.smoothDeltaY;
     }
@@ -242,8 +260,13 @@ class HandTrackerEngine {
     this.lastHandX = currentHandX;
     this.lastHandY = currentHandY;
 
-    // 1. Pinch detection (Index Tip 8 to Thumb Tip 4)
+    // Measure the pinch against palm width so detection is independent of camera distance.
     const pinchDist = Math.hypot(thumb.x - indexTip.x, thumb.y - indexTip.y);
+    const palmWidth = Math.hypot(
+      landmarks[5].x - landmarks[17].x,
+      landmarks[5].y - landmarks[17].y
+    );
+    const normalizedPinchDistance = pinchDist / Math.max(palmWidth, 0.001);
     // 2. Open palm vs Fist
     // An open finger has its tip further from the wrist than its pip joint (index: 8 vs 6, middle: 12 vs 10, etc.)
     const isIndexOpen = Math.hypot(indexTip.x - wrist.x, indexTip.y - wrist.y) > Math.hypot(landmarks[6].x - wrist.x, landmarks[6].y - wrist.y);
@@ -252,7 +275,9 @@ class HandTrackerEngine {
     const isPinkyOpen = Math.hypot(pinkyTip.x - wrist.x, pinkyTip.y - wrist.y) > Math.hypot(landmarks[18].x - wrist.x, landmarks[18].y - wrist.y);
 
     const isFist = !isIndexOpen && !isMiddleOpen && !isRingOpen && !isPinkyOpen;
-    this.isPinching = pinchDist < (this.isPinching ? 0.2 : 0.15) && !isFist;
+    this.isPinching =
+      normalizedPinchDistance < (this.isPinching ? 0.48 : 0.34) &&
+      !isFist;
     const isPinching = this.isPinching;
 
     let gesture: HandGestureState['gesture'] = 'move';
@@ -275,7 +300,7 @@ class HandTrackerEngine {
       cursorY,
       deltaX,
       deltaY,
-      pinchDistance: pinchDist,
+      pinchDistance: normalizedPinchDistance,
       isPinching,
     });
   }

@@ -29,13 +29,11 @@ export const FloatingPhotosOverlay: React.FC<Props> = ({
   onSelectPhoto,
   activePhoto,
 }) => {
-  const wasPinchingRef = useRef<boolean>(false);
+  const pinchArmedRef = useRef<boolean>(false);
+  const previousPinchDistanceRef = useRef<number | null>(null);
 
   const cursorScreenX = gestureState.cursorX * width;
   const cursorScreenY = gestureState.cursorY * height;
-
-  let photoUnderCursor: MemoryPhoto | null = null;
-  let photoUnderCursorDepth = -Infinity;
 
   const projectedCards = photos.map((photo) => {
     // Keep memories outside the tree silhouette, while letting them spread in chaos mode.
@@ -55,13 +53,8 @@ export const FloatingPhotosOverlay: React.FC<Props> = ({
     const isFront = proj.z > -3.5;
     const cardWidth = (width < 640 ? 112 : 128) * scale;
     const isUnderCursor =
-      Math.abs(screenX - cursorScreenX) <= cardWidth * 0.72 &&
-      Math.abs(screenY - cursorScreenY) <= 78 * scale + 12;
-
-    if (isUnderCursor && isFront && proj.z > photoUnderCursorDepth) {
-      photoUnderCursor = photo;
-      photoUnderCursorDepth = proj.z;
-    }
+      Math.abs(screenX - cursorScreenX) <= cardWidth * 0.9 &&
+      Math.abs(screenY - cursorScreenY) <= 82 * scale + 18;
 
     return {
       photo,
@@ -73,26 +66,58 @@ export const FloatingPhotosOverlay: React.FC<Props> = ({
       isUnderCursor,
     };
   }).sort((a, b) => a.proj.z - b.proj.z);
+  const photoUnderCursor =
+    [...projectedCards].reverse().find((card) => card.isUnderCursor && card.isFront)?.photo ?? null;
 
-  // Open only on the transition into a pinch, not while holding one over a photo.
+  // Require a clearly open-to-closed finger movement before selecting a photo.
   useEffect(() => {
     const isPinching = gestureState.hasHand &&
       gestureState.gesture === 'pinch' &&
       gestureState.isPinching;
-    const pinchStarted = isPinching && !wasPinchingRef.current;
-    wasPinchingRef.current = isPinching;
+
+    if (!gestureState.hasHand) {
+      pinchArmedRef.current = false;
+      previousPinchDistanceRef.current = null;
+      return;
+    }
 
     if (
-      width > 0 &&
-      height > 0 &&
-      pinchStarted &&
-      photoUnderCursor &&
-      !activePhoto
+      !isPinching &&
+      gestureState.gesture !== 'fist' &&
+      gestureState.pinchDistance > 0.7
     ) {
-      chimeAudio.playChime(1046.5, 0.15); // C6 bell chime
+      pinchArmedRef.current = true;
+    }
+
+    const previousPinchDistance = previousPinchDistanceRef.current;
+    const closedWithMotion =
+      isPinching &&
+      pinchArmedRef.current &&
+      previousPinchDistance !== null &&
+      previousPinchDistance > 0.48 &&
+      previousPinchDistance - gestureState.pinchDistance > 0.14;
+    previousPinchDistanceRef.current = gestureState.pinchDistance;
+
+    if (closedWithMotion) {
+      pinchArmedRef.current = false;
+      if (!photoUnderCursor || activePhoto || width <= 0 || height <= 0) return;
+
+      chimeAudio.playChime(1046.5, 0.15);
       onSelectPhoto(photoUnderCursor);
     }
-  }, [width, height, gestureState.hasHand, gestureState.gesture, gestureState.isPinching, photoUnderCursor, onSelectPhoto, activePhoto]);
+  }, [
+    width,
+    height,
+    gestureState.hasHand,
+    gestureState.gesture,
+    gestureState.isPinching,
+    gestureState.pinchDistance,
+    gestureState.cursorX,
+    gestureState.cursorY,
+    photoUnderCursor?.id,
+    onSelectPhoto,
+    activePhoto,
+  ]);
 
   if (width === 0 || height === 0) return null;
 
