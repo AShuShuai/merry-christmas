@@ -289,13 +289,17 @@ class HandTrackerEngine {
     const isPinkyOpen = Math.hypot(pinkyTip.x - wrist.x, pinkyTip.y - wrist.y) > Math.hypot(landmarks[18].x - wrist.x, landmarks[18].y - wrist.y);
 
     const fingersClosed = !isIndexOpen && !isMiddleOpen && !isRingOpen && !isPinkyOpen;
-    const isFist = fingersClosed && normalizedPinchDistance > 0.9;
+    const pinchCandidate =
+      isIndexOpen &&
+      normalizedPinchDistance < 0.48;
+    const isFist = fingersClosed && !pinchCandidate;
+
     if (isFist) {
       this.isPinching = false;
       this.pinchStartFrames = 0;
       this.pinchReleaseFrames = 0;
     } else if (this.isPinching) {
-      this.pinchReleaseFrames = normalizedPinchDistance > 0.98
+      this.pinchReleaseFrames = normalizedPinchDistance > 0.58 || !isIndexOpen
         ? this.pinchReleaseFrames + 1
         : 0;
       if (this.pinchReleaseFrames >= 2) {
@@ -303,7 +307,7 @@ class HandTrackerEngine {
         this.pinchReleaseFrames = 0;
       }
     } else {
-      this.pinchStartFrames = normalizedPinchDistance < 0.78
+      this.pinchStartFrames = pinchCandidate
         ? this.pinchStartFrames + 1
         : 0;
       if (this.pinchStartFrames >= 2) {

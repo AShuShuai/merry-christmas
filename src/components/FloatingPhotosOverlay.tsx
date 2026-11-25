@@ -43,8 +43,8 @@ export const FloatingPhotosOverlay: React.FC<Props> = ({
     const positions = new Map<string, { x: number; y: number }>();
     for (const photo of photos) {
       positions.set(photo.id, {
-        x: 0.12 + Math.random() * 0.76,
-        y: 0.14 + Math.random() * 0.72,
+        x: 0.2 + Math.random() * 0.6,
+        y: 0.16 + Math.random() * 0.62,
       });
     }
     dispersedPositionsRef.current = positions;
@@ -114,7 +114,7 @@ export const FloatingPhotosOverlay: React.FC<Props> = ({
     if (
       !isPinching &&
       gestureState.gesture !== 'fist' &&
-      gestureState.pinchDistance > 0.38
+      gestureState.pinchDistance > 0.25
     ) {
       pinchOpenDistanceRef.current = Math.max(
         pinchOpenDistanceRef.current ?? 0,
@@ -126,7 +126,7 @@ export const FloatingPhotosOverlay: React.FC<Props> = ({
       isPinching &&
       pinchOpenDistanceRef.current !== null &&
       pinchOpenDistanceRef.current - gestureState.pinchDistance >=
-        Math.max(0.07, pinchOpenDistanceRef.current * 0.12);
+        Math.max(0.04, pinchOpenDistanceRef.current * 0.08);
 
     if (closedWithMotion) {
       pinchOpenDistanceRef.current = null;
