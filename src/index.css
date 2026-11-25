@@ -76,6 +76,16 @@ body,
   animation: fadeIn 0.25s ease-out forwards;
 }
 
+@keyframes fadeOut {
+  to {
+    opacity: 0;
+  }
+}
+
+.animate-fade-out {
+  animation: fadeOut 0.24s ease-in forwards;
+}
+
 @keyframes scaleUp {
   from {
     opacity: 0;
@@ -89,4 +99,22 @@ body,
 
 .animate-scale-up {
   animation: scaleUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes scaleDown {
+  to {
+    opacity: 0;
+    transform: scale(0.78);
+  }
+}
+
+.animate-scale-down {
+  animation: scaleDown 0.24s cubic-bezier(0.4, 0, 1, 1) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-out,
+  .animate-scale-down {
+    animation-duration: 0.01ms;
+  }
 }

@@ -1,28 +1,58 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { X, Heart, Sparkles } from 'lucide-react';
 import { MemoryPhoto } from '../types';
 
 interface Props {
   photo: MemoryPhoto | null;
+  closeRequest: number;
   onClose: () => void;
 }
 
-export const PhotoLightbox: React.FC<Props> = ({ photo, onClose }) => {
+export const PhotoLightbox: React.FC<Props> = ({ photo, closeRequest, onClose }) => {
+  const [isClosing, setIsClosing] = useState(false);
+  const closeTimerRef = useRef<number | null>(null);
+  const lastCloseRequestRef = useRef(closeRequest);
+
+  useEffect(() => {
+    setIsClosing(false);
+    return () => {
+      if (closeTimerRef.current !== null) {
+        window.clearTimeout(closeTimerRef.current);
+      }
+    };
+  }, [photo?.id]);
+
+  const handleClose = () => {
+    if (isClosing) return;
+    setIsClosing(true);
+    closeTimerRef.current = window.setTimeout(onClose, 240);
+  };
+
+  useEffect(() => {
+    if (lastCloseRequestRef.current === closeRequest) return;
+    lastCloseRequestRef.current = closeRequest;
+    if (photo) handleClose();
+  }, [closeRequest, photo]);
+
   if (!photo) return null;
 
   return (
     <div
-      onClick={onClose}
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in font-sans"
+      onClick={handleClose}
+      className={`fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md font-sans ${
+        isClosing ? 'animate-fade-out' : 'animate-fade-in'
+      }`}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="relative max-w-lg w-full bg-gradient-to-b from-slate-900/95 via-[#0c1427]/95 to-slate-900/95 rounded-3xl p-5 sm:p-6 border-2 border-cyan-400/50 shadow-[0_20px_60px_rgba(0,0,0,0.8),0_0_50px_rgba(0,240,255,0.35)] animate-scale-up"
+        className={`relative max-w-lg w-full bg-gradient-to-b from-slate-900/95 via-[#0c1427]/95 to-slate-900/95 rounded-3xl p-5 sm:p-6 border-2 border-cyan-400/50 shadow-[0_20px_60px_rgba(0,0,0,0.8),0_0_50px_rgba(0,240,255,0.35)] ${
+          isClosing ? 'animate-scale-down' : 'animate-scale-up'
+        }`}
       >
         {/* Close Button */}
         <button
           type="button"
-          onClick={onClose}
+          onClick={handleClose}
           className="absolute -top-3 -right-3 w-9 h-9 rounded-full bg-cyan-500 text-slate-950 font-bold flex items-center justify-center shadow-lg hover:bg-cyan-400 hover:scale-110 transition-all cursor-pointer z-10"
         >
           <X size={18} strokeWidth={2.5} />
@@ -61,7 +91,7 @@ export const PhotoLightbox: React.FC<Props> = ({ photo, onClose }) => {
           </div>
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleClose}
             className="px-3.5 py-1.5 rounded-full bg-cyan-500/20 hover:bg-cyan-500/35 border border-cyan-400/40 text-cyan-200 font-semibold transition-all text-xs"
           >
             Chiudi Ricordo

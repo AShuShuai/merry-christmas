@@ -22,6 +22,9 @@ class HandTrackerEngine {
   private smoothCursorX: number | null = null;
   private smoothCursorY: number | null = null;
   private isPinching: boolean = false;
+  private smoothedPinchDistance: number | null = null;
+  private pinchStartFrames: number = 0;
+  private pinchReleaseFrames: number = 0;
   private smoothDeltaX: number = 0;
   private smoothDeltaY: number = 0;
 
@@ -151,6 +154,9 @@ class HandTrackerEngine {
     this.smoothCursorX = null;
     this.smoothCursorY = null;
     this.isPinching = false;
+    this.smoothedPinchDistance = null;
+    this.pinchStartFrames = 0;
+    this.pinchReleaseFrames = 0;
     this.lastVideoTime = -1;
     this.smoothDeltaX = 0;
     this.smoothDeltaY = 0;
@@ -192,6 +198,9 @@ class HandTrackerEngine {
       this.smoothCursorX = null;
       this.smoothCursorY = null;
       this.isPinching = false;
+      this.smoothedPinchDistance = null;
+      this.pinchStartFrames = 0;
+      this.pinchReleaseFrames = 0;
       this.smoothDeltaX = 0;
       this.smoothDeltaY = 0;
 
@@ -266,7 +275,12 @@ class HandTrackerEngine {
       landmarks[5].x - landmarks[17].x,
       landmarks[5].y - landmarks[17].y
     );
-    const normalizedPinchDistance = pinchDist / Math.max(palmWidth, 0.001);
+    const rawNormalizedPinchDistance = pinchDist / Math.max(palmWidth, 0.001);
+    this.smoothedPinchDistance = this.smoothedPinchDistance === null
+      ? rawNormalizedPinchDistance
+      : this.smoothedPinchDistance +
+        (rawNormalizedPinchDistance - this.smoothedPinchDistance) * 0.55;
+    const normalizedPinchDistance = this.smoothedPinchDistance;
     // 2. Open palm vs Fist
     // An open finger has its tip further from the wrist than its pip joint (index: 8 vs 6, middle: 12 vs 10, etc.)
     const isIndexOpen = Math.hypot(indexTip.x - wrist.x, indexTip.y - wrist.y) > Math.hypot(landmarks[6].x - wrist.x, landmarks[6].y - wrist.y);
@@ -274,10 +288,30 @@ class HandTrackerEngine {
     const isRingOpen = Math.hypot(ringTip.x - wrist.x, ringTip.y - wrist.y) > Math.hypot(landmarks[14].x - wrist.x, landmarks[14].y - wrist.y);
     const isPinkyOpen = Math.hypot(pinkyTip.x - wrist.x, pinkyTip.y - wrist.y) > Math.hypot(landmarks[18].x - wrist.x, landmarks[18].y - wrist.y);
 
-    const isFist = !isIndexOpen && !isMiddleOpen && !isRingOpen && !isPinkyOpen;
-    this.isPinching =
-      normalizedPinchDistance < (this.isPinching ? 0.48 : 0.34) &&
-      !isFist;
+    const fingersClosed = !isIndexOpen && !isMiddleOpen && !isRingOpen && !isPinkyOpen;
+    const isFist = fingersClosed && normalizedPinchDistance > 0.9;
+    if (isFist) {
+      this.isPinching = false;
+      this.pinchStartFrames = 0;
+      this.pinchReleaseFrames = 0;
+    } else if (this.isPinching) {
+      this.pinchReleaseFrames = normalizedPinchDistance > 0.98
+        ? this.pinchReleaseFrames + 1
+        : 0;
+      if (this.pinchReleaseFrames >= 2) {
+        this.isPinching = false;
+        this.pinchReleaseFrames = 0;
+      }
+    } else {
+      this.pinchStartFrames = normalizedPinchDistance < 0.78
+        ? this.pinchStartFrames + 1
+        : 0;
+      if (this.pinchStartFrames >= 2) {
+        this.isPinching = true;
+        this.pinchStartFrames = 0;
+        this.pinchReleaseFrames = 0;
+      }
+    }
     const isPinching = this.isPinching;
 
     let gesture: HandGestureState['gesture'] = 'move';

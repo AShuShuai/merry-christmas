@@ -14,7 +14,8 @@ interface Props {
   scatter?: number;
   gestureState: HandGestureState;
   onSelectPhoto: (photo: MemoryPhoto) => void;
-  activePhoto: MemoryPhoto | null;
+  isPhotoOpen: boolean;
+  onRequestClosePhoto: () => void;
 }
 
 export const FloatingPhotosOverlay: React.FC<Props> = ({
@@ -27,13 +28,28 @@ export const FloatingPhotosOverlay: React.FC<Props> = ({
   scatter = 0,
   gestureState,
   onSelectPhoto,
-  activePhoto,
+  isPhotoOpen,
+  onRequestClosePhoto,
 }) => {
-  const pinchArmedRef = useRef<boolean>(false);
-  const previousPinchDistanceRef = useRef<number | null>(null);
+  const pinchOpenDistanceRef = useRef<number | null>(null);
+  const seenPhotoIdsRef = useRef<Set<string>>(new Set());
+  const dispersedPositionsRef = useRef<Map<string, { x: number; y: number }>>(new Map());
+  const photoIdsRef = useRef<string>('');
 
   const cursorScreenX = gestureState.cursorX * width;
   const cursorScreenY = gestureState.cursorY * height;
+  const photoIds = photos.map((photo) => photo.id).join('|');
+  if (photoIdsRef.current !== photoIds) {
+    const positions = new Map<string, { x: number; y: number }>();
+    for (const photo of photos) {
+      positions.set(photo.id, {
+        x: 0.12 + Math.random() * 0.76,
+        y: 0.14 + Math.random() * 0.72,
+      });
+    }
+    dispersedPositionsRef.current = positions;
+    photoIdsRef.current = photoIds;
+  }
 
   const projectedCards = photos.map((photo) => {
     // Keep memories outside the tree silhouette, while letting them spread in chaos mode.
@@ -44,21 +60,29 @@ export const FloatingPhotosOverlay: React.FC<Props> = ({
 
     const proj = project(px, py, pz, yaw, pitch, width, height, focal);
 
-    const formedScale = Math.max(0.46, Math.min(0.68, proj.scale * 0.022));
-    const scale = formedScale * (1 - scatter * 0.35);
-    const screenX = Math.min(width - 82 * scale, Math.max(82 * scale, proj.x));
-    const screenY = Math.min(height - 92 * scale, Math.max(92 * scale, proj.y));
+    const formedScale = Math.max(0.16, Math.min(0.22, proj.scale * 0.007));
+    const dispersedScale = Math.min(0.82, Math.max(0.52, proj.scale * 0.022));
+    const scale = formedScale + (dispersedScale - formedScale) * scatter;
+    const dispersedPosition = dispersedPositionsRef.current.get(photo.id)!;
+    const dispersedX = dispersedPosition.x * width;
+    const dispersedY = dispersedPosition.y * height;
+    const targetX = proj.x + (dispersedX - proj.x) * scatter;
+    const targetY = proj.y + (dispersedY - proj.y) * scatter;
+    const screenX = Math.min(width - 64 * scale, Math.max(64 * scale, targetX));
+    const screenY = Math.min(height - 54 * scale, Math.max(54 * scale, targetY));
 
     // Front/back depth calculation
     const isFront = proj.z > -3.5;
     const cardWidth = (width < 640 ? 112 : 128) * scale;
     const isUnderCursor =
+      scatter > 0.25 &&
       Math.abs(screenX - cursorScreenX) <= cardWidth * 0.9 &&
       Math.abs(screenY - cursorScreenY) <= 82 * scale + 18;
 
     return {
       photo,
       proj,
+      scatter,
       screenX,
       screenY,
       scale,
@@ -67,43 +91,67 @@ export const FloatingPhotosOverlay: React.FC<Props> = ({
     };
   }).sort((a, b) => a.proj.z - b.proj.z);
   const photoUnderCursor =
-    [...projectedCards].reverse().find((card) => card.isUnderCursor && card.isFront)?.photo ?? null;
+    [...projectedCards].reverse().find((card) => card.isUnderCursor)?.photo ?? null;
 
-  // Require a clearly open-to-closed finger movement before selecting a photo.
+  useEffect(() => {
+    const availableIds = new Set(photos.map((photo) => photo.id));
+    seenPhotoIdsRef.current = new Set(
+      [...seenPhotoIdsRef.current].filter((id) => availableIds.has(id))
+    );
+  }, [photos]);
+
+  // Each pinch opens a not-yet-seen memory until a full randomized cycle has completed.
   useEffect(() => {
     const isPinching = gestureState.hasHand &&
       gestureState.gesture === 'pinch' &&
       gestureState.isPinching;
 
     if (!gestureState.hasHand) {
-      pinchArmedRef.current = false;
-      previousPinchDistanceRef.current = null;
+      pinchOpenDistanceRef.current = null;
       return;
     }
 
     if (
       !isPinching &&
       gestureState.gesture !== 'fist' &&
-      gestureState.pinchDistance > 0.7
+      gestureState.pinchDistance > 0.38
     ) {
-      pinchArmedRef.current = true;
+      pinchOpenDistanceRef.current = Math.max(
+        pinchOpenDistanceRef.current ?? 0,
+        gestureState.pinchDistance
+      );
     }
 
-    const previousPinchDistance = previousPinchDistanceRef.current;
     const closedWithMotion =
       isPinching &&
-      pinchArmedRef.current &&
-      previousPinchDistance !== null &&
-      previousPinchDistance > 0.48 &&
-      previousPinchDistance - gestureState.pinchDistance > 0.14;
-    previousPinchDistanceRef.current = gestureState.pinchDistance;
+      pinchOpenDistanceRef.current !== null &&
+      pinchOpenDistanceRef.current - gestureState.pinchDistance >=
+        Math.max(0.07, pinchOpenDistanceRef.current * 0.12);
 
     if (closedWithMotion) {
-      pinchArmedRef.current = false;
-      if (!photoUnderCursor || activePhoto || width <= 0 || height <= 0) return;
+      pinchOpenDistanceRef.current = null;
+      if (isPhotoOpen) {
+        onRequestClosePhoto();
+        return;
+      }
+      if (!photoUnderCursor || width <= 0 || height <= 0 || photos.length === 0) return;
 
+      const seen = seenPhotoIdsRef.current;
+      const unseenPhotos = photos.filter((photo) => !seen.has(photo.id));
+      let selectedPhoto: MemoryPhoto;
+
+      if (unseenPhotos.length === 0) {
+        seen.clear();
+        selectedPhoto = photos[Math.floor(Math.random() * photos.length)];
+      } else if (unseenPhotos.some((photo) => photo.id === photoUnderCursor.id)) {
+        selectedPhoto = photoUnderCursor;
+      } else {
+        selectedPhoto = unseenPhotos[Math.floor(Math.random() * unseenPhotos.length)];
+      }
+
+      seen.add(selectedPhoto.id);
       chimeAudio.playChime(1046.5, 0.15);
-      onSelectPhoto(photoUnderCursor);
+      onSelectPhoto(selectedPhoto);
     }
   }, [
     width,
@@ -116,7 +164,9 @@ export const FloatingPhotosOverlay: React.FC<Props> = ({
     gestureState.cursorY,
     photoUnderCursor?.id,
     onSelectPhoto,
-    activePhoto,
+    photos,
+    isPhotoOpen,
+    onRequestClosePhoto,
   ]);
 
   if (width === 0 || height === 0) return null;
@@ -161,11 +211,12 @@ export const FloatingPhotosOverlay: React.FC<Props> = ({
       )}
 
       {/* 3D Floating Memory Polaroid Cards */}
-      {projectedCards.map(({ photo, proj, screenX, screenY, scale: baseScale, isFront, isUnderCursor }) => {
+      {projectedCards.map(({ photo, proj, scatter: cardScatter, screenX, screenY, scale: baseScale, isFront, isUnderCursor }) => {
         // If card is too far behind, hide or make deeply faded
-        const opacity = isFront
+        const depthOpacity = isFront
           ? Math.min(1, Math.max(0.65, (proj.z + 8) / 14))
           : Math.max(0.18, (proj.z + 10) / 25);
+        const opacity = depthOpacity * Math.min(1, cardScatter / 0.3);
 
         const isHoveredByHand = gestureState.hasHand && isUnderCursor && isFront;
         const scale = isHoveredByHand ? baseScale * 1.12 : baseScale;
@@ -177,7 +228,7 @@ export const FloatingPhotosOverlay: React.FC<Props> = ({
               chimeAudio.playChime(1046.5, 0.15);
               onSelectPhoto(photo);
             }}
-            className={`absolute pointer-events-auto transform -translate-x-1/2 -translate-y-1/2 cursor-pointer group ${
+            className={`absolute transform -translate-x-1/2 -translate-y-1/2 cursor-pointer group ${
               isFront ? 'z-20' : 'z-10'
             }`}
             style={{
@@ -185,6 +236,7 @@ export const FloatingPhotosOverlay: React.FC<Props> = ({
               top: `${screenY}px`,
               transform: `translate(-50%, -50%) scale(${scale})`,
               opacity,
+              pointerEvents: cardScatter > 0.25 ? 'auto' : 'none',
             }}
           >
             <div className="absolute left-1/2 -top-3 h-3 -translate-x-1/2 border-l border-amber-200/80" />

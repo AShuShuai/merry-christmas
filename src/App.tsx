@@ -8,8 +8,9 @@ import { TreeSettings, HandGestureState, MemoryPhoto } from './types';
 import { DEFAULT_SETTINGS } from './config/themes';
 import { chimeAudio } from './utils/audio';
 
-const SETTINGS_STORAGE_KEY = 'christmas_tree_settings_v5';
+const SETTINGS_STORAGE_KEY = 'christmas_tree_settings_v6';
 const PREVIOUS_SETTINGS_STORAGE_KEYS = [
+  'christmas_tree_settings_v5',
   'christmas_tree_settings_v4',
   'christmas_tree_settings_v3',
 ];
@@ -18,16 +19,18 @@ interface ChristmasSceneProps {
   settings: TreeSettings;
   gestureState: HandGestureState;
   canvasRef: React.MutableRefObject<CanvasHandle | null>;
-  selectedPhoto: MemoryPhoto | null;
+  isPhotoOpen: boolean;
   onSelectPhoto: (photo: MemoryPhoto) => void;
+  onRequestClosePhoto: () => void;
 }
 
 const ChristmasScene = React.memo<ChristmasSceneProps>(({
   settings,
   gestureState,
   canvasRef,
-  selectedPhoto,
+  isPhotoOpen,
   onSelectPhoto,
+  onRequestClosePhoto,
 }) => {
   const [cameraState, setCameraState] = useState({
     yaw: 0,
@@ -72,7 +75,8 @@ const ChristmasScene = React.memo<ChristmasSceneProps>(({
           scatter={cameraState.scatter}
           gestureState={gestureState}
           onSelectPhoto={onSelectPhoto}
-          activePhoto={selectedPhoto}
+          isPhotoOpen={isPhotoOpen}
+          onRequestClosePhoto={onRequestClosePhoto}
         />
       )}
     </>
@@ -87,7 +91,7 @@ export const App: React.FC = () => {
         return {
           ...DEFAULT_SETTINGS,
           ...JSON.parse(saved),
-          treeState: 'dispersed',
+          treeState: 'formed',
         };
       }
       for (const storageKey of PREVIOUS_SETTINGS_STORAGE_KEYS) {
@@ -97,7 +101,7 @@ export const App: React.FC = () => {
             ...DEFAULT_SETTINGS,
             ...JSON.parse(previousSettings),
             webcamEnabled: true,
-            treeState: 'dispersed',
+            treeState: 'formed',
           };
         }
       }
@@ -126,6 +130,24 @@ export const App: React.FC = () => {
 
   // Selected Memory Photo for Lightbox Modal
   const [selectedPhoto, setSelectedPhoto] = useState<MemoryPhoto | null>(null);
+  const [photoCloseRequest, setPhotoCloseRequest] = useState(0);
+  const photoOpenRef = useRef(false);
+  const closeRequestedRef = useRef(false);
+  const handleSelectPhoto = useCallback((photo: MemoryPhoto) => {
+    closeRequestedRef.current = false;
+    photoOpenRef.current = true;
+    setSelectedPhoto(photo);
+  }, []);
+  const handleClosePhoto = useCallback(() => {
+    photoOpenRef.current = false;
+    closeRequestedRef.current = false;
+    setSelectedPhoto(null);
+  }, []);
+  const requestPhotoClose = useCallback(() => {
+    if (!photoOpenRef.current || closeRequestedRef.current) return;
+    closeRequestedRef.current = true;
+    setPhotoCloseRequest((request) => request + 1);
+  }, []);
 
   // Sync to localStorage
   useEffect(() => {
@@ -185,17 +207,18 @@ export const App: React.FC = () => {
   const handleGestureUpdate = useCallback((st: HandGestureState) => {
     setGestureState(st);
 
-    // Keep the tree dispersed whenever no hand is detected.
-    if (!st.hasHand || st.gesture === 'open_palm') {
+    // Keep the tree formed when no hand is visible; an open palm disperses it.
+    if (!st.hasHand || st.gesture === 'fist') {
+      setSettings((prev) => (prev.treeState !== 'formed' ? { ...prev, treeState: 'formed' } : prev));
+    } else if (st.gesture === 'open_palm') {
       setSettings((prev) => (prev.treeState !== 'dispersed' ? { ...prev, treeState: 'dispersed' } : prev));
     }
 
     // Fist ✊: Assemble tree back into conical Christmas tree & close modal
     if (st.gesture === 'fist') {
-      setSettings((prev) => (prev.treeState !== 'formed' ? { ...prev, treeState: 'formed' } : prev));
-      setSelectedPhoto(null);
+      requestPhotoClose();
     }
-  }, []);
+  }, [requestPhotoClose]);
 
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-[#02050c] select-none">
@@ -203,8 +226,9 @@ export const App: React.FC = () => {
         settings={settings}
         gestureState={gestureState}
         canvasRef={canvasRef}
-        selectedPhoto={selectedPhoto}
-        onSelectPhoto={setSelectedPhoto}
+        isPhotoOpen={selectedPhoto !== null}
+        onSelectPhoto={handleSelectPhoto}
+        onRequestClosePhoto={requestPhotoClose}
       />
 
       {/* Keep the tracker mounted while the UI is hidden to avoid restarting the camera. */}
@@ -237,7 +261,11 @@ export const App: React.FC = () => {
       )}
 
       {/* Fullscreen Photo Lightbox Modal */}
-      <PhotoLightbox photo={selectedPhoto} onClose={() => setSelectedPhoto(null)} />
+      <PhotoLightbox
+        photo={selectedPhoto}
+        closeRequest={photoCloseRequest}
+        onClose={handleClosePhoto}
+      />
     </div>
   );
 };

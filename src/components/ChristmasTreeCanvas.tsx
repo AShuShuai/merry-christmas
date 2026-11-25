@@ -6,6 +6,15 @@ import { createProjector } from '../engine/projection';
 import { chimeAudio } from '../utils/audio';
 
 const TAU = Math.PI * 2;
+const TRUNK_SPRITES = generateSprites([
+  [96, 52, 30],
+  [131, 74, 40],
+  [167, 102, 56],
+  [193, 119, 63],
+  [220, 157, 91],
+  [245, 198, 130],
+  [144, 77, 52],
+]);
 
 function rand(max: number, min: number = 0): number {
   return min + Math.random() * (max - min);
@@ -47,6 +56,11 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
     const scatterRef = useRef<number>(0);
     const starSequenceRef = useRef<number>(0);
     const zoomRef = useRef<number>(1.0);
+    const lastCameraUpdateRef = useRef<number>(0);
+    const backgroundGradientRef = useRef<{ key: string; gradient: CanvasGradient | null }>({
+      key: '',
+      gradient: null,
+    });
 
   // Scene points refs
   const treePointsRef = useRef<TreePoint[]>([]);
@@ -199,7 +213,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
 
     const w = window.innerWidth;
     const h = window.innerHeight;
-    const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+    const dpr = Math.min(window.devicePixelRatio || 1, 1.25);
 
     cv.width = Math.floor(w * dpr);
     cv.height = Math.floor(h * dpr);
@@ -365,20 +379,32 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
       const scatter = scatterRef.current;
       if (settings.treeState !== 'formed' || !settings.showStar) {
         starSequenceRef.current = 0;
-      } else if (scatter < 0.06 && intro >= 0.995) {
+      } else if (scatter < 0.06 && intro >= 0.9) {
         starSequenceRef.current += dt;
       }
 
-      // Broadcast camera and scatter state to 3D floating photos overlay
-      onCameraUpdateRef.current?.(yaw, pitch, w, h, effFocal, scatter);
+      // The canvas renders at display refresh rate; the DOM photo overlay only needs 30 updates/sec.
+      if (currentTimeMs - lastCameraUpdateRef.current >= 1000 / 30) {
+        onCameraUpdateRef.current?.(yaw, pitch, w, h, effFocal, scatter);
+        lastCameraUpdateRef.current = currentTimeMs;
+      }
 
       // 1. Background
       ctx.globalCompositeOperation = 'source-over';
       ctx.globalAlpha = 1;
-      const bgGrad = ctx.createRadialGradient(w / 2, h * 0.45, 0, w / 2, h * 0.45, Math.max(w, h) * 0.75);
-      bgGrad.addColorStop(0, currentTheme.bgGradient[0]);
-      bgGrad.addColorStop(0.5, currentTheme.bgGradient[1]);
-      bgGrad.addColorStop(1, currentTheme.bgGradient[2]);
+      const gradientKey = `${w}:${h}:${currentTheme.bgGradient.join(':')}`;
+      if (backgroundGradientRef.current.key !== gradientKey) {
+        const gradient = ctx.createRadialGradient(w / 2, h * 0.45, 0, w / 2, h * 0.45, Math.max(w, h) * 0.75);
+        gradient.addColorStop(0, currentTheme.bgGradient[0]);
+        gradient.addColorStop(0.5, currentTheme.bgGradient[1]);
+        gradient.addColorStop(1, currentTheme.bgGradient[2]);
+        backgroundGradientRef.current = { key: gradientKey, gradient };
+      }
+      const bgGrad = backgroundGradientRef.current.gradient;
+      if (!bgGrad) {
+        animFrameRef.current = requestAnimationFrame(render);
+        return;
+      }
       ctx.fillStyle = bgGrad;
       ctx.fillRect(0, 0, w, h);
 
@@ -494,32 +520,36 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         ctx.drawImage(spr, cx - size / 2, cy - size / 2, size, size);
       }
 
-      // Draw the star-shaped trunk over the foliage so it stays visible.
+      // Draw a dense, multicolored brown sparkle trunk, revealed from the roots upward.
       if (scatter < 0.98) {
         ctx.save();
-        ctx.globalCompositeOperation = 'source-over';
-        for (let row = 0; row < 9; row++) {
-          const trunkY = -9.1 + row * 0.34;
-          const trunkHalfWidth = 0.38 - row * 0.018;
-          for (let column = 0; column < 3; column++) {
-            const x = (column - 1) * trunkHalfWidth;
-            const z = ((row + column) % 2) * 0.18 - 0.09;
-            const point = projectFrame(x, trunkY, z);
-            const radius = Math.max(2, point.scale * 0.12);
+        ctx.globalCompositeOperation = 'lighter';
+        const trunkRows = 21;
+        const trunkColumns = 9;
+        for (let row = 0; row < trunkRows; row++) {
+          const rowProgress = row / (trunkRows - 1);
+          const rowReveal = intro * trunkRows - row;
+          if (rowReveal <= 0) continue;
 
-            ctx.globalAlpha = (1 - scatter) * (0.76 + ((row + column) % 3) * 0.08);
-            ctx.fillStyle = (row + column) % 3 === 0 ? '#d49a62' : '#754126';
-            ctx.beginPath();
-            for (let tip = 0; tip < 10; tip++) {
-              const angle = (tip * Math.PI) / 5 - Math.PI / 2;
-              const tipRadius = tip % 2 === 0 ? radius : radius * 0.42;
-              const sx = point.x + Math.cos(angle) * tipRadius;
-              const sy = point.y + Math.sin(angle) * tipRadius;
-              if (tip === 0) ctx.moveTo(sx, sy);
-              else ctx.lineTo(sx, sy);
-            }
-            ctx.closePath();
-            ctx.fill();
+          const trunkY = -9.1 + rowProgress * 3.8;
+          const trunkHalfWidth = 0.5 - rowProgress * 0.12;
+          for (let column = 0; column < trunkColumns; column++) {
+            const columnPosition = column / (trunkColumns - 1) * 2 - 1;
+            const x = columnPosition * trunkHalfWidth + Math.sin(row * 2.1 + column * 1.7) * 0.035;
+            const z = ((row + column) % 5 - 2) * 0.09;
+            const point = projectFrame(x, trunkY, z);
+            const twinkle = 0.35 + 0.65 * Math.max(0, Math.sin(time * 5 + row * 1.3 + column * 2.2));
+            const fadeIn = Math.min(1, rowReveal);
+            const size = Math.max(2.5, point.scale * (0.2 + twinkle * 0.16));
+
+            ctx.globalAlpha = (1 - scatter) * fadeIn * (0.5 + twinkle * 0.5);
+            ctx.drawImage(
+              TRUNK_SPRITES[(row * 3 + column * 5) % TRUNK_SPRITES.length],
+              point.x - size / 2,
+              point.y - size / 2,
+              size,
+              size
+            );
           }
         }
         ctx.restore();
@@ -569,7 +599,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
 
       // 8. Gather light from the roots toward the treetop, then reveal the top star.
       const starSequenceTime = starSequenceRef.current;
-      const gatherDuration = 1.0;
+      const gatherDuration = 0.4;
       if (
         settings.showStar &&
         settings.treeState === 'formed' &&
@@ -581,8 +611,8 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         ctx.shadowColor = '#fff2a6';
         ctx.shadowBlur = 9;
         const moteCount = 26;
-        const launchSpan = 0.5;
-        const travelDuration = 0.48;
+        const launchSpan = 0.2;
+        const travelDuration = 0.24;
         for (let i = 0; i < moteCount; i++) {
           const launchTime = (i / (moteCount - 1)) * launchSpan;
           const age = starSequenceTime - launchTime;
@@ -610,7 +640,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         ctx.restore();
       }
 
-      const starAppearDuration = 0.35;
+      const starAppearDuration = 0.2;
       const starReveal = Math.max(0, Math.min(1, (starSequenceTime - gatherDuration) / starAppearDuration));
       if (settings.showStar && settings.treeState === 'formed' && starReveal > 0) {
         const appearScale = 0.2 + 0.8 * (1 - Math.pow(1 - starReveal, 3));
