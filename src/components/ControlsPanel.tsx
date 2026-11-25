@@ -16,9 +16,16 @@ import {
   ChevronLeft,
   Heart,
   Wand2,
+  Image,
+  Plus,
+  Trash2,
+  Video,
+  VideoOff,
+  Hand,
 } from 'lucide-react';
-import { TreeSettings, ThemeId, GreetingFont } from '../types';
+import { TreeSettings, ThemeId, GreetingFont, MemoryPhoto } from '../types';
 import { THEMES } from '../config/themes';
+import { DEFAULT_PHOTOS } from '../config/defaultPhotos';
 import { CanvasHandle } from './ChristmasTreeCanvas';
 
 interface Props {
@@ -28,6 +35,7 @@ interface Props {
   isFullscreen: boolean;
   onToggleFullscreen: () => void;
   onToggleAudio: () => void;
+  onToggleWebcam: () => void;
 }
 
 export const ControlsPanel: React.FC<Props> = ({
@@ -37,16 +45,89 @@ export const ControlsPanel: React.FC<Props> = ({
   isFullscreen,
   onToggleFullscreen,
   onToggleAudio,
+  onToggleWebcam,
 }) => {
   const [isOpen, setIsOpen] = useState<boolean>(false);
-  const [activeTab, setActiveTab] = useState<'text' | 'theme' | 'effects'>('text');
+  const [activeTab, setActiveTab] = useState<'photos' | 'text' | 'theme' | 'effects'>('photos');
+
+  // New photo form state
+  const [newTitle, setNewTitle] = useState<string>('');
+  const [newSubtitle, setNewSubtitle] = useState<string>('');
+  const [newImgUrl, setNewImgUrl] = useState<string>('');
 
   const themesList = Object.values(THEMES);
+
+  // Handle local image file upload
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const result = event.target?.result as string;
+      if (result) {
+        setNewImgUrl(result);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleAddPhoto = () => {
+    if (!newImgUrl.trim()) return;
+
+    const newPhoto: MemoryPhoto = {
+      id: `photo-${Date.now()}`,
+      url: newImgUrl,
+      title: newTitle.trim() || 'Ricordo Speciale ❤️',
+      subtitle: newSubtitle.trim() || 'Un momento magico insieme',
+      angle: Math.random() * Math.PI * 2,
+      y: (Math.random() - 0.5) * 8,
+      radius: 6.0 + Math.random() * 2.0,
+    };
+
+    onUpdateSettings((prev) => ({
+      ...prev,
+      showPhotos: true,
+      photos: [...prev.photos, newPhoto],
+    }));
+
+    setNewTitle('');
+    setNewSubtitle('');
+    setNewImgUrl('');
+  };
+
+  const handleRemovePhoto = (id: string) => {
+    onUpdateSettings((prev) => ({
+      ...prev,
+      photos: prev.photos.filter((p) => p.id !== id),
+    }));
+  };
+
+  const handleResetPhotos = () => {
+    onUpdateSettings((prev) => ({
+      ...prev,
+      photos: DEFAULT_PHOTOS,
+    }));
+  };
 
   return (
     <>
       {/* Floating Action Button Bar (Top Right) */}
       <div className="fixed top-4 right-4 z-50 flex items-center gap-2 pointer-events-auto">
+        {/* Webcam Hand Tracking Toggle Button */}
+        <button
+          type="button"
+          onClick={onToggleWebcam}
+          title={settings.webcamEnabled ? 'Disattiva Webcam Gesti Mano' : 'Attiva Webcam & Gesti della Mano 🖐️'}
+          className={`p-3 rounded-full backdrop-blur-md border transition-all duration-300 shadow-lg ${
+            settings.webcamEnabled
+              ? 'bg-cyan-500/40 border-cyan-400 text-cyan-200 shadow-cyan-500/30 animate-pulse'
+              : 'bg-black/40 border-white/15 text-white/70 hover:text-white hover:bg-black/60 hover:border-white/30'
+          }`}
+        >
+          {settings.webcamEnabled ? <Video size={18} className="text-cyan-300" /> : <VideoOff size={18} />}
+        </button>
+
         {/* Toggle Audio Chimes Button */}
         <button
           type="button"
@@ -95,42 +176,44 @@ export const ControlsPanel: React.FC<Props> = ({
         <button
           type="button"
           onClick={() => setIsOpen((prev) => !prev)}
-          title="Personalizza Albero e Dedica"
+          title="Personalizza Albero, Foto e Gesti"
           className={`px-4 py-2.5 rounded-full backdrop-blur-md border font-sans text-xs font-semibold flex items-center gap-2 transition-all duration-300 shadow-lg ${
             isOpen
-              ? 'bg-pink-500/35 border-pink-400/60 text-white shadow-pink-500/30'
-              : 'bg-black/45 border-white/20 text-white/90 hover:bg-black/65 hover:border-pink-400/50 hover:text-white'
+              ? 'bg-cyan-500/35 border-cyan-400/60 text-white shadow-cyan-500/30'
+              : 'bg-black/45 border-white/20 text-white/90 hover:bg-black/65 hover:border-cyan-400/50 hover:text-white'
           }`}
         >
-          <Sparkles size={16} className="text-pink-300 animate-spin-slow" />
+          <Sparkles size={16} className="text-cyan-300 animate-spin-slow" />
           <span>Personalizza</span>
           {isOpen ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
         </button>
       </div>
 
       {/* Interactive Helper Hint (Bottom Left) */}
-      <div className="fixed bottom-4 left-4 z-40 pointer-events-none text-[11px] font-sans text-white/40 bg-black/30 backdrop-blur-sm px-3 py-1.5 rounded-full border border-white/10 hidden sm:flex items-center gap-2">
-        <span className="w-1.5 h-1.5 rounded-full bg-pink-400 animate-pulse" />
-        <span>Trascina con il mouse per ruotare in 3D • Clicca per scintillii luminosi</span>
+      <div className="fixed bottom-4 left-4 z-40 pointer-events-none text-[11px] font-sans text-white/50 bg-black/40 backdrop-blur-md px-3.5 py-2 rounded-full border border-cyan-400/20 hidden sm:flex items-center gap-2">
+        <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
+        <span>
+          {settings.webcamEnabled
+            ? '🖐️ Muovi la mano per ruotare • 👌 Pizzica per aprire la foto'
+            : 'Trascina per ruotare in 3D • Tocca le foto per aprirle'}
+        </span>
       </div>
 
       {/* Settings Modal Drawer (Slide-in from Right) */}
       {isOpen && (
-        <aside
-          className="fixed top-0 right-0 h-full w-full sm:w-[420px] z-50 bg-[#0d0711]/92 backdrop-blur-xl border-l border-white/15 text-white flex flex-col shadow-2xl animate-slide-left font-sans"
-        >
+        <aside className="fixed top-0 right-0 h-full w-full sm:w-[440px] z-50 bg-[#070e1c]/95 backdrop-blur-2xl border-l border-cyan-400/20 text-white flex flex-col shadow-2xl animate-slide-left font-sans">
           {/* Header */}
           <div className="p-5 border-b border-white/10 flex items-center justify-between">
             <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-xl bg-pink-500/20 border border-pink-400/40 flex items-center justify-center text-pink-300">
+              <div className="w-8 h-8 rounded-xl bg-cyan-500/20 border border-cyan-400/40 flex items-center justify-center text-cyan-300">
                 <Sparkles size={18} />
               </div>
               <div>
-                <h2 className="text-sm font-bold tracking-wide flex items-center gap-1.5">
-                  <span>Albero di Natale Magico</span>
-                  <Heart size={14} className="text-pink-400 fill-pink-400" />
+                <h2 className="text-sm font-bold tracking-wide flex items-center gap-1.5 text-white">
+                  <span>Albero di Natale &amp; Ricordi</span>
+                  <Heart size={14} className="text-cyan-400 fill-cyan-400" />
                 </h2>
-                <p className="text-[11px] text-white/50">Personalizza atmosfera, dedica e colori</p>
+                <p className="text-[11px] text-cyan-200/60">Foto fluttuanti 3D, gesti della mano e dedica</p>
               </div>
             </div>
             <button
@@ -143,48 +226,195 @@ export const ControlsPanel: React.FC<Props> = ({
           </div>
 
           {/* Navigation Tabs */}
-          <div className="grid grid-cols-3 p-2 bg-white/[0.03] border-b border-white/10 text-xs font-medium">
+          <div className="grid grid-cols-4 p-2 bg-white/[0.02] border-b border-white/10 text-xs font-medium">
             <button
               type="button"
-              onClick={() => setActiveTab('text')}
-              className={`py-2.5 rounded-lg flex items-center justify-center gap-1.5 transition-all ${
-                activeTab === 'text'
-                  ? 'bg-pink-500/20 text-pink-200 border border-pink-500/40 font-semibold'
+              onClick={() => setActiveTab('photos')}
+              className={`py-2 rounded-lg flex items-center justify-center gap-1 transition-all ${
+                activeTab === 'photos'
+                  ? 'bg-cyan-500/25 text-cyan-200 border border-cyan-500/40 font-semibold'
                   : 'text-white/60 hover:text-white'
               }`}
             >
-              <Type size={14} />
+              <Image size={13} />
+              <span>Foto</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('text')}
+              className={`py-2 rounded-lg flex items-center justify-center gap-1 transition-all ${
+                activeTab === 'text'
+                  ? 'bg-cyan-500/25 text-cyan-200 border border-cyan-500/40 font-semibold'
+                  : 'text-white/60 hover:text-white'
+              }`}
+            >
+              <Type size={13} />
               <span>Dedica</span>
             </button>
             <button
               type="button"
               onClick={() => setActiveTab('theme')}
-              className={`py-2.5 rounded-lg flex items-center justify-center gap-1.5 transition-all ${
+              className={`py-2 rounded-lg flex items-center justify-center gap-1 transition-all ${
                 activeTab === 'theme'
-                  ? 'bg-pink-500/20 text-pink-200 border border-pink-500/40 font-semibold'
+                  ? 'bg-cyan-500/25 text-cyan-200 border border-cyan-500/40 font-semibold'
                   : 'text-white/60 hover:text-white'
               }`}
             >
-              <Palette size={14} />
+              <Palette size={13} />
               <span>Temi</span>
             </button>
             <button
               type="button"
               onClick={() => setActiveTab('effects')}
-              className={`py-2.5 rounded-lg flex items-center justify-center gap-1.5 transition-all ${
+              className={`py-2 rounded-lg flex items-center justify-center gap-1 transition-all ${
                 activeTab === 'effects'
-                  ? 'bg-pink-500/20 text-pink-200 border border-pink-500/40 font-semibold'
+                  ? 'bg-cyan-500/25 text-cyan-200 border border-cyan-500/40 font-semibold'
                   : 'text-white/60 hover:text-white'
               }`}
             >
-              <Sliders size={14} />
-              <span>Effetti 3D</span>
+              <Sliders size={13} />
+              <span>Effetti</span>
             </button>
           </div>
 
           {/* Content Body */}
           <div className="flex-1 overflow-y-auto p-5 space-y-6 text-xs custom-scrollbar">
-            {/* TAB 1: DEDICA / GREETING TEXT */}
+            {/* TAB: FOTO & RICORDI FLUTTUANTI */}
+            {activeTab === 'photos' && (
+              <div className="space-y-5">
+                {/* Hand Gesture Instruction Banner */}
+                <div className="p-3.5 rounded-2xl bg-cyan-500/10 border border-cyan-400/30 flex items-start gap-3">
+                  <div className="p-2 rounded-xl bg-cyan-400/20 text-cyan-300 shrink-0">
+                    <Hand size={18} />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-cyan-200 text-xs mb-1">Controllo con la Mano AI</h3>
+                    <p className="text-[11px] text-cyan-100/70 leading-relaxed">
+                      Attiva la webcam in alto: muovi la mano per <strong>ruotare l'albero</strong>. Quando la mano è
+                      vicina a una foto, <strong>pizzica con indice e pollice (👌)</strong> per aprirla a schermo intero!
+                    </p>
+                  </div>
+                </div>
+
+                {/* Show/Hide Photos Toggle */}
+                <div className="flex items-center justify-between p-3 rounded-xl bg-white/[0.04] border border-white/10">
+                  <div>
+                    <span className="font-semibold text-white block">Mostra Foto sull'Albero 3D</span>
+                    <span className="text-[10px] text-white/50">Foto polaroid che ruotano con l'albero</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={settings.showPhotos}
+                    onChange={(e) =>
+                      onUpdateSettings((prev) => ({ ...prev, showPhotos: e.target.checked }))
+                    }
+                    className="w-4 h-4 rounded accent-cyan-400 cursor-pointer"
+                  />
+                </div>
+
+                {/* Add New Custom Photo Section */}
+                <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 space-y-3">
+                  <h4 className="font-semibold text-white flex items-center gap-1.5">
+                    <Plus size={14} className="text-cyan-400" />
+                    <span>Aggiungi una Foto Personale</span>
+                  </h4>
+
+                  <div>
+                    <label className="block text-[11px] text-white/70 mb-1">Carica Foto dal Dispositivo</label>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleFileUpload}
+                      className="w-full text-[11px] text-white/60 file:mr-2 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:bg-cyan-500/20 file:text-cyan-200 file:font-semibold hover:file:bg-cyan-500/30 cursor-pointer"
+                    />
+                  </div>
+
+                  {newImgUrl && (
+                    <div className="relative w-20 h-20 rounded-xl overflow-hidden border border-cyan-400/50 shadow-md">
+                      <img src={newImgUrl} alt="Preview" className="w-full h-full object-cover" />
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="block text-[11px] text-white/70 mb-1">Titolo del Ricordo</label>
+                    <input
+                      type="text"
+                      value={newTitle}
+                      onChange={(e) => setNewTitle(e.target.value)}
+                      placeholder="es. Io e Chiara a Natale ❤️"
+                      className="w-full px-3 py-2 rounded-xl bg-white/[0.05] border border-white/15 text-white placeholder-white/30 focus:outline-none focus:border-cyan-400 text-xs"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] text-white/70 mb-1">Dedica o Sottotitolo (Opzionale)</label>
+                    <input
+                      type="text"
+                      value={newSubtitle}
+                      onChange={(e) => setNewSubtitle(e.target.value)}
+                      placeholder="es. Una serata indimenticabile..."
+                      className="w-full px-3 py-2 rounded-xl bg-white/[0.05] border border-white/15 text-white placeholder-white/30 focus:outline-none focus:border-cyan-400 text-xs"
+                    />
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleAddPhoto}
+                    disabled={!newImgUrl}
+                    className="w-full py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-slate-950 font-bold text-xs disabled:opacity-40 hover:brightness-110 transition-all cursor-pointer shadow-lg shadow-cyan-500/20"
+                  >
+                    Aggiungi Ricordo all'Albero ✨
+                  </button>
+                </div>
+
+                {/* Current Photos List */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-white/90">Foto Attuali ({settings.photos.length})</span>
+                    <button
+                      type="button"
+                      onClick={handleResetPhotos}
+                      className="text-[10px] text-cyan-300 hover:underline"
+                    >
+                      Ripristina Default
+                    </button>
+                  </div>
+
+                  <div className="space-y-2">
+                    {settings.photos.map((photo) => (
+                      <div
+                        key={photo.id}
+                        className="flex items-center justify-between p-2 rounded-xl bg-white/[0.03] border border-white/10 group hover:border-cyan-400/40 transition-all"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <img
+                            src={photo.url}
+                            alt={photo.title}
+                            className="w-10 h-10 rounded-lg object-cover border border-white/20"
+                          />
+                          <div className="min-w-0">
+                            <div className="font-semibold text-white text-[11px] truncate">{photo.title}</div>
+                            {photo.subtitle && (
+                              <div className="text-[10px] text-white/50 truncate italic">{photo.subtitle}</div>
+                            )}
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleRemovePhoto(photo.id)}
+                          className="p-1.5 rounded-lg text-white/40 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* TAB: DEDICA */}
             {activeTab === 'text' && (
               <div className="space-y-5">
                 <div>
@@ -195,7 +425,7 @@ export const ControlsPanel: React.FC<Props> = ({
                       onClick={() =>
                         onUpdateSettings((prev) => ({ ...prev, showGreeting: !prev.showGreeting }))
                       }
-                      className="text-[11px] text-pink-300 hover:underline flex items-center gap-1"
+                      className="text-[11px] text-cyan-300 hover:underline flex items-center gap-1"
                     >
                       {settings.showGreeting ? <Eye size={12} /> : <EyeOff size={12} />}
                       <span>{settings.showGreeting ? 'Visibile' : 'Nascosto'}</span>
@@ -208,7 +438,7 @@ export const ControlsPanel: React.FC<Props> = ({
                       onUpdateSettings((prev) => ({ ...prev, greetingText: e.target.value }))
                     }
                     placeholder="es. Merry Christmas, Buon Natale Chiara ❤️"
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-white/[0.05] border border-white/15 text-white placeholder-white/30 focus:outline-none focus:border-pink-400 focus:bg-white/[0.08] transition-all"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-white/[0.05] border border-white/15 text-white placeholder-white/30 focus:outline-none focus:border-cyan-400 focus:bg-white/[0.08] transition-all"
                   />
                 </div>
 
@@ -230,7 +460,7 @@ export const ControlsPanel: React.FC<Props> = ({
                         onClick={() =>
                           onUpdateSettings((prev) => ({ ...prev, greetingText: phrase, showGreeting: true }))
                         }
-                        className="px-2.5 py-1 rounded-lg bg-white/[0.04] border border-white/10 hover:border-pink-400/50 hover:bg-pink-500/15 text-[11px] text-white/80 transition-all"
+                        className="px-2.5 py-1 rounded-lg bg-white/[0.04] border border-white/10 hover:border-cyan-400/50 hover:bg-cyan-500/15 text-[11px] text-white/80 transition-all"
                       >
                         {phrase}
                       </button>
@@ -255,7 +485,7 @@ export const ControlsPanel: React.FC<Props> = ({
                         }
                         className={`p-2.5 rounded-xl border text-center transition-all ${
                           settings.greetingFont === font.id
-                            ? 'bg-pink-500/25 border-pink-400 text-pink-200 font-bold'
+                            ? 'bg-cyan-500/25 border-cyan-400 text-cyan-200 font-bold'
                             : 'bg-white/[0.03] border-white/10 text-white/70 hover:bg-white/[0.07]'
                         }`}
                       >
@@ -267,7 +497,7 @@ export const ControlsPanel: React.FC<Props> = ({
               </div>
             )}
 
-            {/* TAB 2: TEMI DI COLORE */}
+            {/* TAB: TEMI DI COLORE */}
             {activeTab === 'theme' && (
               <div className="space-y-3">
                 <label className="block font-semibold text-white/90 mb-1">Seleziona Palette</label>
@@ -281,16 +511,16 @@ export const ControlsPanel: React.FC<Props> = ({
                       }
                       className={`p-3.5 rounded-2xl border transition-all cursor-pointer ${
                         isSelected
-                          ? 'bg-white/[0.08] border-pink-400 shadow-[0_0_20px_rgba(255,105,180,0.25)]'
+                          ? 'bg-white/[0.08] border-cyan-400 shadow-[0_0_20px_rgba(0,240,255,0.25)]'
                           : 'bg-white/[0.02] border-white/10 hover:bg-white/[0.05] hover:border-white/25'
                       }`}
                     >
                       <div className="flex items-center justify-between mb-1.5">
-                        <span className={`font-semibold ${isSelected ? 'text-pink-300' : 'text-white'}`}>
+                        <span className={`font-semibold ${isSelected ? 'text-cyan-300' : 'text-white'}`}>
                           {t.name}
                         </span>
                         {isSelected && (
-                          <span className="text-[10px] bg-pink-500/25 text-pink-200 border border-pink-400/40 px-2 py-0.5 rounded-full font-bold">
+                          <span className="text-[10px] bg-cyan-500/25 text-cyan-200 border border-cyan-400/40 px-2 py-0.5 rounded-full font-bold">
                             Attivo
                           </span>
                         )}
@@ -314,7 +544,7 @@ export const ControlsPanel: React.FC<Props> = ({
               </div>
             )}
 
-            {/* TAB 3: EFFETTI & CONTROLLI 3D */}
+            {/* TAB: EFFETTI & CONTROLLI 3D */}
             {activeTab === 'effects' && (
               <div className="space-y-5">
                 {/* Sliders */}
@@ -323,7 +553,7 @@ export const ControlsPanel: React.FC<Props> = ({
                   <div>
                     <div className="flex justify-between text-[11px] mb-1">
                       <span className="text-white/80">Particelle Albero</span>
-                      <span className="font-mono text-pink-300">{settings.totalPoints}</span>
+                      <span className="font-mono text-cyan-300">{settings.totalPoints}</span>
                     </div>
                     <input
                       type="range"
@@ -337,7 +567,7 @@ export const ControlsPanel: React.FC<Props> = ({
                           totalPoints: Number(e.target.value),
                         }))
                       }
-                      className="w-full accent-pink-400"
+                      className="w-full accent-cyan-400"
                     />
                   </div>
 
@@ -345,7 +575,7 @@ export const ControlsPanel: React.FC<Props> = ({
                   <div>
                     <div className="flex justify-between text-[11px] mb-1">
                       <span className="text-white/80">Velocità di Rotazione</span>
-                      <span className="font-mono text-pink-300">{settings.rotationSpeed.toFixed(2)}x</span>
+                      <span className="font-mono text-cyan-300">{settings.rotationSpeed.toFixed(2)}x</span>
                     </div>
                     <input
                       type="range"
@@ -359,7 +589,7 @@ export const ControlsPanel: React.FC<Props> = ({
                           rotationSpeed: Number(e.target.value),
                         }))
                       }
-                      className="w-full accent-pink-400"
+                      className="w-full accent-cyan-400"
                     />
                   </div>
 
@@ -367,7 +597,7 @@ export const ControlsPanel: React.FC<Props> = ({
                   <div>
                     <div className="flex justify-between text-[11px] mb-1">
                       <span className="text-white/80">Petali / Fiocchi Fluttuanti</span>
-                      <span className="font-mono text-pink-300">{settings.petalCount}</span>
+                      <span className="font-mono text-cyan-300">{settings.petalCount}</span>
                     </div>
                     <input
                       type="range"
@@ -381,7 +611,7 @@ export const ControlsPanel: React.FC<Props> = ({
                           petalCount: Number(e.target.value),
                         }))
                       }
-                      className="w-full accent-pink-400"
+                      className="w-full accent-cyan-400"
                     />
                   </div>
 
@@ -389,7 +619,7 @@ export const ControlsPanel: React.FC<Props> = ({
                   <div>
                     <div className="flex justify-between text-[11px] mb-1">
                       <span className="text-white/80">Frequenza Stelle Cadenti</span>
-                      <span className="font-mono text-pink-300">{settings.meteorCount}</span>
+                      <span className="font-mono text-cyan-300">{settings.meteorCount}</span>
                     </div>
                     <input
                       type="range"
@@ -403,7 +633,7 @@ export const ControlsPanel: React.FC<Props> = ({
                           meteorCount: Number(e.target.value),
                         }))
                       }
-                      className="w-full accent-pink-400"
+                      className="w-full accent-cyan-400"
                     />
                   </div>
                 </div>
@@ -438,7 +668,7 @@ export const ControlsPanel: React.FC<Props> = ({
                               [item.key]: e.target.checked,
                             }))
                           }
-                          className="w-4 h-4 rounded accent-pink-400"
+                          className="w-4 h-4 rounded accent-cyan-400"
                         />
                       </label>
                     );
@@ -462,7 +692,7 @@ export const ControlsPanel: React.FC<Props> = ({
 
           {/* Footer Info */}
           <div className="p-4 border-t border-white/10 bg-black/20 text-center text-[10px] text-white/40">
-            Merry Christmas 3D • React + TypeScript Engine
+            Merry Christmas 3D • Hand Gesture &amp; Photo Memories
           </div>
         </aside>
       )}

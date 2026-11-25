@@ -1,9 +1,40 @@
-import { Theme, ThemeId } from '../types';
+import { Theme, ThemeId, TreeSettings } from '../types';
+import { DEFAULT_PHOTOS } from './defaultPhotos';
 
 export const THEMES: Record<ThemeId, Theme> = {
+  frozen: {
+    id: 'frozen',
+    name: 'Regno di Ghiaccio (Blu di Default)',
+    tagline: 'Azzurro artico, ciano glaciale e riflessi diamante',
+    palette: [
+      [0, 240, 255],   // Pure Luminous Cyan
+      [147, 197, 253], // Sky Blue
+      [224, 242, 254], // Icy White Diamond
+      [59, 130, 246],  // Sapphire Blue
+      [165, 180, 252], // Periwinkle Violet
+      [255, 255, 255], // Pure Sparkle
+    ],
+    bgGradient: ['#081b33', '#040e1c', '#01050d'],
+    groundGlow: {
+      inner: 'rgba(0,240,255,0.38)',
+      mid: 'rgba(59,130,246,0.16)',
+      outer: 'rgba(2,132,199,0)',
+    },
+    star: {
+      inner: 'rgba(255,255,255,1)',
+      mid: 'rgba(186,230,253,0.85)',
+      outer: 'rgba(0,240,255,0.28)',
+      star: 'rgba(240,249,255,1)',
+      glow: 'rgba(0,240,255,1)',
+    },
+    petalColor: '#e0f2fe',
+    greetingGradient: ['#ffffff', '#bae6fd', '#38bdf8', '#0284c7'],
+    greetingGlow: 'rgba(56,189,248,0.85)',
+  },
+
   pink: {
     id: 'pink',
-    name: 'Sogno Rosa (Originale)',
+    name: 'Sogno Rosa',
     tagline: 'Fiori di ciliegio, magenta pastello e polvere di stelle',
     palette: [
       [255, 105, 180], // Hot Pink
@@ -59,36 +90,6 @@ export const THEMES: Record<ThemeId, Theme> = {
     petalColor: '#ffffff',
     greetingGradient: ['#ffffff', '#fde68a', '#f59e0b', '#dc2626'],
     greetingGlow: 'rgba(251,191,36,0.85)',
-  },
-
-  frozen: {
-    id: 'frozen',
-    name: 'Regno di Ghiaccio',
-    tagline: 'Azzurro artico, ciano glaciale e riflessi diamante',
-    palette: [
-      [0, 240, 255],   // Pure Cyan
-      [147, 197, 253], // Sky Blue
-      [224, 242, 254], // Icy White
-      [59, 130, 246],  // Cobalt Blue
-      [165, 180, 252], // Periwinkle
-      [255, 255, 255], // Diamond
-    ],
-    bgGradient: ['#081b33', '#040e1c', '#01050d'],
-    groundGlow: {
-      inner: 'rgba(0,240,255,0.36)',
-      mid: 'rgba(59,130,246,0.14)',
-      outer: 'rgba(2,132,199,0)',
-    },
-    star: {
-      inner: 'rgba(255,255,255,1)',
-      mid: 'rgba(186,230,253,0.8)',
-      outer: 'rgba(0,240,255,0.25)',
-      star: 'rgba(240,249,255,1)',
-      glow: 'rgba(0,240,255,1)',
-    },
-    petalColor: '#e0f2fe',
-    greetingGradient: ['#ffffff', '#bae6fd', '#38bdf8', '#0284c7'],
-    greetingGlow: 'rgba(56,189,248,0.85)',
   },
 
   golden: {
@@ -152,8 +153,8 @@ export const THEMES: Record<ThemeId, Theme> = {
   },
 };
 
-export const DEFAULT_SETTINGS: import('../types').TreeSettings = {
-  themeId: 'pink',
+export const DEFAULT_SETTINGS: TreeSettings = {
+  themeId: 'frozen', // Default Blue style per user request!
   totalPoints: 7200,
   strings: 3,
   turns: 27,
@@ -174,4 +175,7 @@ export const DEFAULT_SETTINGS: import('../types').TreeSettings = {
   meteorCount: 4,
   sparkleCount: 150,
   musicEnabled: false,
+  webcamEnabled: false,
+  showPhotos: true,
+  photos: DEFAULT_PHOTOS,
 };

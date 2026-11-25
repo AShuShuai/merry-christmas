@@ -27,6 +27,27 @@ export interface Theme {
 
 export type GreetingFont = 'cursive' | 'serif' | 'cinzel';
 
+export interface MemoryPhoto {
+  id: string;
+  url: string;
+  title: string;
+  subtitle?: string;
+  angle: number;
+  y: number;
+  radius: number;
+}
+
+export interface HandGestureState {
+  hasHand: boolean;
+  gesture: 'none' | 'move' | 'pinch' | 'open_palm' | 'fist';
+  cursorX: number; // Screen normalized 0-1
+  cursorY: number; // Screen normalized 0-1
+  deltaX: number;
+  deltaY: number;
+  pinchDistance: number;
+  isPinching: boolean;
+}
+
 export interface TreeSettings {
   themeId: ThemeId;
   totalPoints: number;
@@ -49,6 +70,10 @@ export interface TreeSettings {
   meteorCount: number;
   sparkleCount: number;
   musicEnabled: boolean;
+  // New Hand Tracking & Photos
+  webcamEnabled: boolean;
+  showPhotos: boolean;
+  photos: MemoryPhoto[];
 }
 
 export interface TreePoint {

@@ -27,10 +27,14 @@ export interface CanvasHandle {
 
 interface Props {
   settings: TreeSettings;
+  gestureDeltaX?: number;
+  gestureDeltaY?: number;
+  onCameraUpdate?: (yaw: number, pitch: number, width: number, height: number, focal: number) => void;
 }
 
-export const ChristmasTreeCanvas = forwardRef<CanvasHandle, Props>(({ settings }, ref) => {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+export const ChristmasTreeCanvas = forwardRef<CanvasHandle, Props>(
+  ({ settings, gestureDeltaX = 0, gestureDeltaY = 0, onCameraUpdate }, ref) => {
+    const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Scene points refs
   const treePointsRef = useRef<TreePoint[]>([]);
@@ -55,7 +59,17 @@ export const ChristmasTreeCanvas = forwardRef<CanvasHandle, Props>(({ settings }
   const isDraggingRef = useRef<boolean>(false);
   const lastPointerRef = useRef({ x: 0, y: 0 });
 
-  const currentTheme = THEMES[settings.themeId] || THEMES.pink;
+  const currentTheme = THEMES[settings.themeId] || THEMES.frozen;
+
+  const gestureRef = useRef({ dx: gestureDeltaX, dy: gestureDeltaY });
+  useEffect(() => {
+    gestureRef.current = { dx: gestureDeltaX, dy: gestureDeltaY };
+  }, [gestureDeltaX, gestureDeltaY]);
+
+  const onCameraUpdateRef = useRef(onCameraUpdate);
+  useEffect(() => {
+    onCameraUpdateRef.current = onCameraUpdate;
+  }, [onCameraUpdate]);
 
   // Rebuild scene particles
   const rebuildScene = useCallback(() => {
@@ -299,10 +313,26 @@ export const ChristmasTreeCanvas = forwardRef<CanvasHandle, Props>(({ settings }
       let intro = Math.min(1, elapsedSinceIntro / 2.4);
       intro = 1 - Math.pow(1 - intro, 3);
 
+      // Apply AI hand gesture rotation
+      const gDx = gestureRef.current.dx;
+      const gDy = gestureRef.current.dy;
+      if (gDx !== 0) {
+        manualRotRef.current.yaw += gDx * 4.5;
+      }
+      if (gDy !== 0) {
+        manualRotRef.current.pitch = Math.max(
+          -0.45,
+          Math.min(0.45, manualRotRef.current.pitch - gDy * 3.0)
+        );
+      }
+
       // Camera Angle
       const autoAngle = settings.autoRotate ? time * settings.rotationSpeed + Math.sin(time * 0.4) * 0.1 : 0;
       const yaw = autoAngle + manualRotRef.current.yaw;
       const pitch = manualRotRef.current.pitch;
+
+      // Broadcast camera to 3D floating photos overlay
+      onCameraUpdateRef.current?.(yaw, pitch, w, h, focal);
 
       // 1. Background
       ctx.globalCompositeOperation = 'source-over';
