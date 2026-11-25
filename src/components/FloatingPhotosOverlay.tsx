@@ -11,6 +11,7 @@ interface Props {
   width: number;
   height: number;
   focal: number;
+  scatter?: number;
   gestureState: HandGestureState;
   onSelectPhoto: (photo: MemoryPhoto) => void;
   activePhoto: MemoryPhoto | null;
@@ -23,6 +24,7 @@ export const FloatingPhotosOverlay: React.FC<Props> = ({
   width,
   height,
   focal,
+  scatter = 0,
   gestureState,
   onSelectPhoto,
   activePhoto,
@@ -39,9 +41,11 @@ export const FloatingPhotosOverlay: React.FC<Props> = ({
   let minCursorDist = Infinity;
 
   const projectedCards = photos.map((photo) => {
-    const px = Math.cos(photo.angle) * photo.radius;
-    const py = photo.y;
-    const pz = Math.sin(photo.angle) * photo.radius;
+    // In Chaos/scattered mode, photos expand outward for easy viewing
+    const effRadius = photo.radius * (1 + scatter * 0.4);
+    const px = Math.cos(photo.angle) * effRadius;
+    const py = photo.y * (1 + scatter * 0.2);
+    const pz = Math.sin(photo.angle) * effRadius;
 
     const proj = project(px, py, pz, yaw, pitch, width, height, focal);
 
@@ -114,7 +118,7 @@ export const FloatingPhotosOverlay: React.FC<Props> = ({
           ? Math.min(1, Math.max(0.65, (proj.z + 8) / 14))
           : Math.max(0.18, (proj.z + 10) / 25);
 
-        const baseScale = Math.max(0.4, Math.min(1.05, proj.scale * 0.022));
+        const baseScale = Math.max(0.4, Math.min(1.25, proj.scale * 0.022 * (1 + scatter * 0.35)));
         const isHoveredByHand = gestureState.hasHand && distToCursor < 90 && isFront;
         const scale = isHoveredByHand ? baseScale * 1.22 : baseScale;
 

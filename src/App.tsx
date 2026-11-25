@@ -11,7 +11,7 @@ import { chimeAudio } from './utils/audio';
 export const App: React.FC = () => {
   const [settings, setSettings] = useState<TreeSettings>(() => {
     try {
-      const saved = localStorage.getItem('christmas_tree_settings_v2');
+      const saved = localStorage.getItem('christmas_tree_settings_v3');
       if (saved) {
         return { ...DEFAULT_SETTINGS, ...JSON.parse(saved) };
       }
@@ -23,6 +23,7 @@ export const App: React.FC = () => {
   });
 
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+  const [isUiHidden, setIsUiHidden] = useState<boolean>(false);
   const canvasRef = useRef<CanvasHandle | null>(null);
 
   // Camera projection state shared with 3D floating photos
@@ -32,6 +33,7 @@ export const App: React.FC = () => {
     width: 0,
     height: 0,
     focal: 800,
+    scatter: 0,
   });
 
   // Hand Tracking Gesture State
@@ -52,7 +54,7 @@ export const App: React.FC = () => {
   // Sync to localStorage
   useEffect(() => {
     try {
-      localStorage.setItem('christmas_tree_settings_v2', JSON.stringify(settings));
+      localStorage.setItem('christmas_tree_settings_v3', JSON.stringify(settings));
     } catch {
       // ignore
     }
@@ -81,6 +83,20 @@ export const App: React.FC = () => {
     }
   };
 
+  // Hotkey 'H' to hide/show UI for clean recording / full immersion
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+      if (e.key === 'h' || e.key === 'H') {
+        setIsUiHidden((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   useEffect(() => {
     const onFsChange = () => {
       setIsFullscreen(!!document.fullscreenElement);
@@ -91,8 +107,15 @@ export const App: React.FC = () => {
 
   // Camera broadcast from canvas render loop
   const handleCameraUpdate = useCallback(
-    (yaw: number, pitch: number, width: number, height: number, focal: number) => {
-      setCameraState({ yaw, pitch, width, height, focal });
+    (
+      yaw: number,
+      pitch: number,
+      width: number,
+      height: number,
+      focal: number,
+      scatter: number
+    ) => {
+      setCameraState({ yaw, pitch, width, height, focal, scatter });
     },
     []
   );
@@ -101,8 +124,14 @@ export const App: React.FC = () => {
   const handleGestureUpdate = useCallback((st: HandGestureState) => {
     setGestureState(st);
 
-    // Fist gesture closes active photo modal
+    // Open Palm 🖐️: Disperse tree into floating cloud of polaroid memories (Chaos Mode)
+    if (st.gesture === 'open_palm') {
+      setSettings((prev) => (prev.treeState !== 'dispersed' ? { ...prev, treeState: 'dispersed' } : prev));
+    }
+
+    // Fist ✊: Assemble tree back into conical Christmas tree & close modal
     if (st.gesture === 'fist') {
+      setSettings((prev) => (prev.treeState !== 'formed' ? { ...prev, treeState: 'formed' } : prev));
       setSelectedPhoto(null);
     }
   }, []);
@@ -127,6 +156,7 @@ export const App: React.FC = () => {
           width={cameraState.width}
           height={cameraState.height}
           focal={cameraState.focal}
+          scatter={cameraState.scatter}
           gestureState={gestureState}
           onSelectPhoto={setSelectedPhoto}
           activePhoto={selectedPhoto}
@@ -134,29 +164,37 @@ export const App: React.FC = () => {
       )}
 
       {/* Webcam Hand Tracking PIP Widget */}
-      <HandTrackingWebcam
-        enabled={settings.webcamEnabled}
-        onToggle={handleToggleWebcam}
-        onGesture={handleGestureUpdate}
-        gestureState={gestureState}
-      />
+      {!isUiHidden && (
+        <HandTrackingWebcam
+          enabled={settings.webcamEnabled}
+          onToggle={handleToggleWebcam}
+          onGesture={handleGestureUpdate}
+          gestureState={gestureState}
+        />
+      )}
 
       {/* Floating Controls Overlay */}
-      <ControlsPanel
-        settings={settings}
-        onUpdateSettings={setSettings}
-        canvasRef={canvasRef}
-        isFullscreen={isFullscreen}
-        onToggleFullscreen={handleToggleFullscreen}
-        onToggleAudio={handleToggleAudio}
-        onToggleWebcam={handleToggleWebcam}
-      />
+      {!isUiHidden && (
+        <ControlsPanel
+          settings={settings}
+          onUpdateSettings={setSettings}
+          canvasRef={canvasRef}
+          isFullscreen={isFullscreen}
+          onToggleFullscreen={handleToggleFullscreen}
+          onToggleAudio={handleToggleAudio}
+          onToggleWebcam={handleToggleWebcam}
+        />
+      )}
+
+      {/* Keyboard Helper Hint */}
+      {!isUiHidden && (
+        <div className="fixed top-4 left-4 z-30 pointer-events-none text-[11px] font-mono text-cyan-200/50 bg-black/35 backdrop-blur-sm px-3 py-1.5 rounded-full border border-cyan-400/15 hidden md:block">
+          Premi <kbd className="px-1.5 py-0.5 rounded bg-white/10 text-cyan-200 font-bold">H</kbd> per nascondere i tasti
+        </div>
+      )}
 
       {/* Fullscreen Photo Lightbox Modal */}
-      <PhotoLightbox
-        photo={selectedPhoto}
-        onClose={() => setSelectedPhoto(null)}
-      />
+      <PhotoLightbox photo={selectedPhoto} onClose={() => setSelectedPhoto(null)} />
     </div>
   );
 };

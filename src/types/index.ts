@@ -70,16 +70,21 @@ export interface TreeSettings {
   meteorCount: number;
   sparkleCount: number;
   musicEnabled: boolean;
-  // New Hand Tracking & Photos
+  // New Hand Tracking & Photos & Chaos Mode
   webcamEnabled: boolean;
   showPhotos: boolean;
   photos: MemoryPhoto[];
+  treeState: 'formed' | 'dispersed';
 }
 
 export interface TreePoint {
   x: number;
   y: number;
   z: number;
+  // Dispersed / Chaos coordinates
+  cx: number;
+  cy: number;
+  cz: number;
   t: number;
   c: number;
   base: number;

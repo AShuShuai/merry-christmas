@@ -290,10 +290,37 @@ export const ControlsPanel: React.FC<Props> = ({
                   <div>
                     <h3 className="font-bold text-cyan-200 text-xs mb-1">Controllo con la Mano AI</h3>
                     <p className="text-[11px] text-cyan-100/70 leading-relaxed">
-                      Attiva la webcam in alto: muovi la mano per <strong>ruotare l'albero</strong>. Quando la mano è
-                      vicina a una foto, <strong>pizzica con indice e pollice (👌)</strong> per aprirla a schermo intero!
+                      Attiva la webcam in alto: muovi la mano per <strong>ruotare l'albero</strong>. Apri il palmo (🖐️)
+                      per <strong>disperdere l'albero in galassia</strong>, chiudi a pugno (✊) per ricompattarlo, e{' '}
+                      <strong>pizzica con indice e pollice (👌)</strong> per aprire le foto!
                     </p>
                   </div>
+                </div>
+
+                {/* Quick Tree State Toggle (Formed vs Dispersed) */}
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => onUpdateSettings((prev) => ({ ...prev, treeState: 'formed' }))}
+                    className={`py-2 px-3 rounded-xl border text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                      settings.treeState === 'formed'
+                        ? 'bg-cyan-500/30 border-cyan-400 text-cyan-200 shadow-md shadow-cyan-500/20'
+                        : 'bg-white/[0.03] border-white/10 text-white/60 hover:text-white'
+                    }`}
+                  >
+                    <span>🎄 Compatto (✊)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onUpdateSettings((prev) => ({ ...prev, treeState: 'dispersed' }))}
+                    className={`py-2 px-3 rounded-xl border text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                      settings.treeState === 'dispersed'
+                        ? 'bg-cyan-500/30 border-cyan-400 text-cyan-200 shadow-md shadow-cyan-500/20'
+                        : 'bg-white/[0.03] border-white/10 text-white/60 hover:text-white'
+                    }`}
+                  >
+                    <span>✨ Esploso (🖐️)</span>
+                  </button>
                 </div>
 
                 {/* Show/Hide Photos Toggle */}

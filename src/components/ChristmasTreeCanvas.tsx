@@ -29,12 +29,23 @@ interface Props {
   settings: TreeSettings;
   gestureDeltaX?: number;
   gestureDeltaY?: number;
-  onCameraUpdate?: (yaw: number, pitch: number, width: number, height: number, focal: number) => void;
+  onCameraUpdate?: (
+    yaw: number,
+    pitch: number,
+    width: number,
+    height: number,
+    focal: number,
+    scatter: number
+  ) => void;
 }
 
 export const ChristmasTreeCanvas = forwardRef<CanvasHandle, Props>(
   ({ settings, gestureDeltaX = 0, gestureDeltaY = 0, onCameraUpdate }, ref) => {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+    // Chaos vs Formed scatter factor (0 = formed tree, 1 = dispersed galaxy)
+    const scatterRef = useRef<number>(0);
+    const zoomRef = useRef<number>(1.0);
 
   // Scene points refs
   const treePointsRef = useRef<TreePoint[]>([]);
@@ -93,10 +104,22 @@ export const ChristmasTreeCanvas = forwardRef<CanvasHandle, Props>(
       const ep = edgePos(w, h);
       const ornament = Math.random() < 0.035;
 
+      // Generate dispersed cloud target coordinates for Chaos mode
+      const phi = Math.random() * TAU;
+      const costheta = Math.random() * 2 - 1;
+      const theta = Math.acos(costheta);
+      const rChaos = 8.0 + Math.random() * 11.0;
+      const cx = rChaos * Math.sin(theta) * Math.cos(phi);
+      const cy = rChaos * Math.cos(theta) - 1.5;
+      const cz = rChaos * Math.sin(theta) * Math.sin(phi);
+
       pts.push({
         x: Math.cos(ang) * radius + rand(j, -j),
         y: -9 + t * 15.2 + rand(j, -j),
         z: Math.sin(ang) * radius + rand(j, -j),
+        cx,
+        cy,
+        cz,
         t: t,
         c: Math.floor(Math.random() * palette.length),
         base: ornament ? rand(0.9, 1.25) : rand(0.15, 0.3),
@@ -326,13 +349,19 @@ export const ChristmasTreeCanvas = forwardRef<CanvasHandle, Props>(
         );
       }
 
-      // Camera Angle
+      // Camera Angle & Zoom
+      const effFocal = focal * zoomRef.current;
       const autoAngle = settings.autoRotate ? time * settings.rotationSpeed + Math.sin(time * 0.4) * 0.1 : 0;
       const yaw = autoAngle + manualRotRef.current.yaw;
       const pitch = manualRotRef.current.pitch;
 
-      // Broadcast camera to 3D floating photos overlay
-      onCameraUpdateRef.current?.(yaw, pitch, w, h, focal);
+      // Chaos vs Formed scatter factor (smooth spring interpolation)
+      const targetScatter = settings.treeState === 'dispersed' ? 1 : 0;
+      scatterRef.current += (targetScatter - scatterRef.current) * 0.06;
+      const scatter = scatterRef.current;
+
+      // Broadcast camera and scatter state to 3D floating photos overlay
+      onCameraUpdateRef.current?.(yaw, pitch, w, h, effFocal, scatter);
 
       // 1. Background
       ctx.globalCompositeOperation = 'source-over';
@@ -398,18 +427,18 @@ export const ChristmasTreeCanvas = forwardRef<CanvasHandle, Props>(
 
       // 4. Ground Glow
       if (settings.showGroundGlow) {
-        const pGlow = project(0, -10.2, 0, yaw, pitch, w, h, focal);
+        const pGlow = project(0, -10.2, 0, yaw, pitch, w, h, effFocal);
         ctx.save();
         ctx.globalCompositeOperation = 'lighter';
         ctx.translate(w / 2, pGlow.y);
         ctx.scale(1, 0.17);
         const pulse = 1 + 0.14 * Math.sin(time * 1.6);
-        const R = focal * 0.44 * pulse;
+        const R = effFocal * 0.44 * pulse;
         const gg = ctx.createRadialGradient(0, 0, 0, 0, 0, R);
         gg.addColorStop(0, currentTheme.groundGlow.inner);
         gg.addColorStop(0.45, currentTheme.groundGlow.mid);
         gg.addColorStop(1, currentTheme.groundGlow.outer);
-        ctx.globalAlpha = 1;
+        ctx.globalAlpha = Math.max(0, 1 - scatter * 1.5);
         ctx.fillStyle = gg;
         ctx.beginPath();
         ctx.arc(0, 0, R, 0, TAU);
@@ -425,7 +454,12 @@ export const ChristmasTreeCanvas = forwardRef<CanvasHandle, Props>(
 
       for (let i = 0; i < pts.length; i++) {
         const pt = pts[i];
-        const p = project(pt.x * breathe, pt.y, pt.z * breathe, yaw, pitch, w, h, focal);
+        // Interpolate between conical Christmas tree and dispersed star galaxy
+        const curX = pt.x * (1 - scatter) + pt.cx * scatter;
+        const curY = pt.y * (1 - scatter) + pt.cy * scatter;
+        const curZ = pt.z * (1 - scatter) + pt.cz * scatter;
+
+        const p = project(curX * breathe, curY, curZ * breathe, yaw, pitch, w, h, effFocal);
         const px = w / 2 + (p.x - w / 2) * intro;
         const py = h / 2 + (p.y - h / 2) * intro;
         let cx = pt.sx + (px - pt.sx) * intro;
@@ -459,7 +493,7 @@ export const ChristmasTreeCanvas = forwardRef<CanvasHandle, Props>(
           const o = orbits[i];
           const a = o.a0 + time * o.spd;
           const yy = o.y + Math.sin(time * o.ws + o.ph) * 0.6;
-          const p = project(Math.cos(a) * o.r, yy, Math.sin(a) * o.r, yaw, pitch, w, h, focal);
+          const p = project(Math.cos(a) * o.r, yy, Math.sin(a) * o.r, yaw, pitch, w, h, effFocal);
           const tw = 0.5 + 0.5 * Math.sin(time * 3 + o.ph);
           const size = o.size * p.scale * (0.8 + 0.5 * tw);
           ctx.globalAlpha = (0.35 + 0.5 * tw) * 0.85;
@@ -495,14 +529,14 @@ export const ChristmasTreeCanvas = forwardRef<CanvasHandle, Props>(
 
       // 8. Top Star
       if (settings.showStar) {
-        const pStar = project(0, 7.7, 0, yaw, pitch, w, h, focal);
+        const pStar = project(0, 7.7 + scatter * 2.5, 0, yaw, pitch, w, h, effFocal);
         const pulse = 1 + 0.14 * Math.sin(time * 3.2);
         ctx.save();
         ctx.globalCompositeOperation = 'lighter';
         ctx.translate(pStar.x, pStar.y);
         ctx.scale(pulse, pulse);
 
-        const R = focal * 0.22;
+        const R = effFocal * 0.22;
         const gStar = ctx.createRadialGradient(0, 0, 0, 0, 0, R);
         gStar.addColorStop(0, currentTheme.star.inner);
         gStar.addColorStop(0.12, currentTheme.star.mid);
@@ -515,7 +549,7 @@ export const ChristmasTreeCanvas = forwardRef<CanvasHandle, Props>(
         ctx.fill();
 
         // 10 Rays
-        const rayLen = focal * 0.28;
+        const rayLen = effFocal * 0.28;
         for (let i = 0; i < 10; i++) {
           ctx.save();
           ctx.rotate((i * Math.PI) / 5 + time * 0.55);
@@ -622,13 +656,20 @@ export const ChristmasTreeCanvas = forwardRef<CanvasHandle, Props>(
     };
   }, [handleResize, currentTheme, settings]);
 
+  const handleWheel = (e: React.WheelEvent) => {
+    zoomRef.current = Math.max(0.6, Math.min(2.0, zoomRef.current - e.deltaY * 0.001));
+  };
+
   return (
     <canvas
       ref={canvasRef}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
-      onPointerLeave={() => { isDraggingRef.current = false; }}
+      onPointerLeave={() => {
+        isDraggingRef.current = false;
+      }}
+      onWheel={handleWheel}
       className="fixed inset-0 w-full h-full block cursor-grab active:cursor-grabbing select-none touch-none"
     />
   );

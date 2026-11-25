@@ -178,4 +178,5 @@ export const DEFAULT_SETTINGS: TreeSettings = {
   webcamEnabled: false,
   showPhotos: true,
   photos: DEFAULT_PHOTOS,
+  treeState: 'formed',
 };
