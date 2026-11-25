@@ -8,6 +8,12 @@ import { TreeSettings, HandGestureState, MemoryPhoto } from './types';
 import { DEFAULT_SETTINGS } from './config/themes';
 import { chimeAudio } from './utils/audio';
 
+const SETTINGS_STORAGE_KEY = 'christmas_tree_settings_v5';
+const PREVIOUS_SETTINGS_STORAGE_KEYS = [
+  'christmas_tree_settings_v4',
+  'christmas_tree_settings_v3',
+];
+
 interface ChristmasSceneProps {
   settings: TreeSettings;
   gestureState: HandGestureState;
@@ -76,9 +82,20 @@ const ChristmasScene = React.memo<ChristmasSceneProps>(({
 export const App: React.FC = () => {
   const [settings, setSettings] = useState<TreeSettings>(() => {
     try {
-      const saved = localStorage.getItem('christmas_tree_settings_v3');
+      const saved = localStorage.getItem(SETTINGS_STORAGE_KEY);
       if (saved) {
         return { ...DEFAULT_SETTINGS, ...JSON.parse(saved) };
+      }
+      for (const storageKey of PREVIOUS_SETTINGS_STORAGE_KEYS) {
+        const previousSettings = localStorage.getItem(storageKey);
+        if (previousSettings) {
+          return {
+            ...DEFAULT_SETTINGS,
+            ...JSON.parse(previousSettings),
+            webcamEnabled: true,
+            treeState: 'dispersed',
+          };
+        }
       }
     } catch {
       // fallback
@@ -102,7 +119,6 @@ export const App: React.FC = () => {
     pinchDistance: 1,
     isPinching: false,
   });
-  const previousGestureRef = useRef<HandGestureState['gesture']>('none');
 
   // Selected Memory Photo for Lightbox Modal
   const [selectedPhoto, setSelectedPhoto] = useState<MemoryPhoto | null>(null);
@@ -110,7 +126,7 @@ export const App: React.FC = () => {
   // Sync to localStorage
   useEffect(() => {
     try {
-      localStorage.setItem('christmas_tree_settings_v3', JSON.stringify(settings));
+      localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
     } catch {
       // ignore
     }
@@ -163,12 +179,10 @@ export const App: React.FC = () => {
 
   // Gesture callback from MediaPipe hand tracker
   const handleGestureUpdate = useCallback((st: HandGestureState) => {
-    const previousGesture = previousGestureRef.current;
-    previousGestureRef.current = st.gesture;
     setGestureState(st);
 
-    // Opening the hand disperses the tree; releasing a fist reverses the formation.
-    if (st.gesture === 'open_palm' || (previousGesture === 'fist' && st.gesture !== 'fist')) {
+    // A deliberate open-palm gesture disperses the tree; losing hand tracking does not.
+    if (st.gesture === 'open_palm') {
       setSettings((prev) => (prev.treeState !== 'dispersed' ? { ...prev, treeState: 'dispersed' } : prev));
     }
 

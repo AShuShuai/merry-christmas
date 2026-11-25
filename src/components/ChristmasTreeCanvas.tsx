@@ -488,6 +488,37 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         ctx.drawImage(spr, cx - size / 2, cy - size / 2, size, size);
       }
 
+      // Draw the star-shaped trunk over the foliage so it stays visible.
+      if (scatter < 0.98) {
+        ctx.save();
+        ctx.globalCompositeOperation = 'source-over';
+        for (let row = 0; row < 9; row++) {
+          const trunkY = -9.1 + row * 0.34;
+          const trunkHalfWidth = 0.38 - row * 0.018;
+          for (let column = 0; column < 3; column++) {
+            const x = (column - 1) * trunkHalfWidth;
+            const z = ((row + column) % 2) * 0.18 - 0.09;
+            const point = projectFrame(x, trunkY, z);
+            const radius = Math.max(2, point.scale * 0.12);
+
+            ctx.globalAlpha = (1 - scatter) * (0.76 + ((row + column) % 3) * 0.08);
+            ctx.fillStyle = (row + column) % 3 === 0 ? '#d49a62' : '#754126';
+            ctx.beginPath();
+            for (let tip = 0; tip < 10; tip++) {
+              const angle = (tip * Math.PI) / 5 - Math.PI / 2;
+              const tipRadius = tip % 2 === 0 ? radius : radius * 0.42;
+              const sx = point.x + Math.cos(angle) * tipRadius;
+              const sy = point.y + Math.sin(angle) * tipRadius;
+              if (tip === 0) ctx.moveTo(sx, sy);
+              else ctx.lineTo(sx, sy);
+            }
+            ctx.closePath();
+            ctx.fill();
+          }
+        }
+        ctx.restore();
+      }
+
       // 6. Orbiting Points (fairy dust)
       if (settings.showOrbits) {
         ctx.globalCompositeOperation = 'lighter';

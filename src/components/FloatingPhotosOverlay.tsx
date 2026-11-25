@@ -29,7 +29,7 @@ export const FloatingPhotosOverlay: React.FC<Props> = ({
   onSelectPhoto,
   activePhoto,
 }) => {
-  const lastPinchTimeRef = useRef<number>(0);
+  const wasPinchingRef = useRef<boolean>(false);
 
   const cursorScreenX = gestureState.cursorX * width;
   const cursorScreenY = gestureState.cursorY * height;
@@ -46,16 +46,17 @@ export const FloatingPhotosOverlay: React.FC<Props> = ({
 
     const proj = project(px, py, pz, yaw, pitch, width, height, focal);
 
-    const formedScale = Math.max(0.58, Math.min(0.92, proj.scale * 0.03));
+    const formedScale = Math.max(0.46, Math.min(0.68, proj.scale * 0.022));
     const scale = formedScale * (1 - scatter * 0.35);
     const screenX = Math.min(width - 82 * scale, Math.max(82 * scale, proj.x));
     const screenY = Math.min(height - 92 * scale, Math.max(92 * scale, proj.y));
 
     // Front/back depth calculation
     const isFront = proj.z > -3.5;
+    const cardWidth = (width < 640 ? 112 : 128) * scale;
     const isUnderCursor =
-      Math.abs(screenX - cursorScreenX) <= 78 * scale &&
-      Math.abs(screenY - cursorScreenY) <= 88 * scale;
+      Math.abs(screenX - cursorScreenX) <= cardWidth * 0.72 &&
+      Math.abs(screenY - cursorScreenY) <= 78 * scale + 12;
 
     if (isUnderCursor && isFront && proj.z > photoUnderCursorDepth) {
       photoUnderCursor = photo;
@@ -73,24 +74,25 @@ export const FloatingPhotosOverlay: React.FC<Props> = ({
     };
   }).sort((a, b) => a.proj.z - b.proj.z);
 
-  // Handle gesture pinch opening the highlighted photo
+  // Open only on the transition into a pinch, not while holding one over a photo.
   useEffect(() => {
+    const isPinching = gestureState.hasHand &&
+      gestureState.gesture === 'pinch' &&
+      gestureState.isPinching;
+    const pinchStarted = isPinching && !wasPinchingRef.current;
+    wasPinchingRef.current = isPinching;
+
     if (
       width > 0 &&
       height > 0 &&
-      gestureState.gesture === 'pinch' &&
-      gestureState.isPinching &&
+      pinchStarted &&
       photoUnderCursor &&
       !activePhoto
     ) {
-      const now = Date.now();
-      if (now - lastPinchTimeRef.current > 1500) {
-        lastPinchTimeRef.current = now;
-        chimeAudio.playChime(1046.5, 0.15); // C6 bell chime
-        onSelectPhoto(photoUnderCursor);
-      }
+      chimeAudio.playChime(1046.5, 0.15); // C6 bell chime
+      onSelectPhoto(photoUnderCursor);
     }
-  }, [width, height, gestureState.gesture, gestureState.isPinching, photoUnderCursor, onSelectPhoto, activePhoto]);
+  }, [width, height, gestureState.hasHand, gestureState.gesture, gestureState.isPinching, photoUnderCursor, onSelectPhoto, activePhoto]);
 
   if (width === 0 || height === 0) return null;
 
@@ -160,16 +162,18 @@ export const FloatingPhotosOverlay: React.FC<Props> = ({
               opacity,
             }}
           >
+            <div className="absolute left-1/2 -top-3 h-3 -translate-x-1/2 border-l border-amber-200/80" />
+            <div className="absolute left-1/2 -top-1 z-10 h-1.5 w-1.5 -translate-x-1/2 rounded-full border border-amber-100 bg-amber-300 shadow-[0_0_6px_rgba(253,224,71,0.8)]" />
             {/* Polaroid Frame */}
             <div
-              className={`w-[130px] sm:w-[155px] p-2 pb-3 rounded-2xl bg-white shadow-xl transition-all duration-300 ${
+              className={`w-[112px] sm:w-[128px] p-1.5 pb-2 rounded-xl bg-white shadow-xl transition-all duration-300 ${
                 isHoveredByHand
                   ? 'border-2 border-cyan-400 shadow-[0_0_35px_rgba(0,240,255,0.7)] scale-105'
                   : 'border border-cyan-200/40 shadow-[0_10px_25px_rgba(0,0,0,0.5)] group-hover:border-cyan-400 group-hover:shadow-[0_0_25px_rgba(0,240,255,0.5)] group-hover:scale-105'
               }`}
             >
               {/* Image thumbnail */}
-              <div className="relative w-full aspect-[4/3] rounded-xl overflow-hidden bg-slate-900">
+              <div className="relative w-full aspect-[4/3] rounded-lg overflow-hidden bg-slate-900">
                 <img
                   src={photo.url}
                   alt={photo.title}

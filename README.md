@@ -12,13 +12,16 @@ Una versione interattiva, moderna e mozzafiato in **React 18 + TypeScript + Vite
 
 ### 2. 🖐️ Controllo con i Gesti della Mano (Webcam AI)
 Basato sul modello ufficiale **Google MediaPipe Hand Landmarker** (in esecuzione 100% locale nel browser, massima privacy):
+- La webcam si avvia automaticamente all'apertura; al primo avvio il browser potrebbe chiedere il permesso.
+- All'avvio, senza un pugno rilevato, le stelle restano sparse. Se la mano esce dall'inquadratura, l'albero mantiene l'ultimo stato.
+- **Mano aperta (🖐️)**: disperde l'albero in una nuvola di ricordi.
+- **Pugno chiuso (✊)**: ricompone l'albero.
 - **Ruota l'albero nello spazio 3D**: muovi semplicemente la mano a destra o sinistra per far girare l'albero come per magia.
 - **Puntatore della mano**: segue la punta dell'indice e mostra la posa rilevata — mano aperta, pizzico o pugno chiuso.
 - **Pizzica (👌 Indice + Pollice)**: quando sei vicino a una foto polaroid, pizzica per aprirla ed espanderla a schermo intero!
-- **Pugno Chiuso (✊)**: chiude il modal della foto aperta.
 
 ### 3. 📸 Foto & Ricordi Fluttuanti 3D
-- Fotografie polaroid che fluttuano attorno all'albero di Natale e ruotano in prospettiva 3D.
+- Tronco e rami luminosi con fotografie polaroid appese attorno all'albero, in prospettiva 3D.
 - Include 5 foto ricordo natalizie predefinite pronte all'uso.
 - **Caricamento Foto Personali**: dal pannello *"Personalizza"* -> scheda *"Foto"*, puoi caricare qualsiasi foto dal tuo PC (con titolo e dedica personalizzata), salvata automaticamente nel browser.
 - **Modal Romantico Lightbox**: cliccando sulla foto (o pizzicando con le dita) si apre un ricordo polaroid con animazione, dedica e suono a carillon.
@@ -33,6 +36,6 @@ npm run dev
 ```
 
 Apri `http://localhost:3000`:
-1. In alto a destra premi l'icona della **Videocamera** per attivare il tracciamento della mano.
-2. Mostra la mano alla webcam per ruotare l'albero a mezz'aria!
-3. Clicca su qualsiasi foto polaroid o fai il gesto del pizzico (👌) per aprirla.
+1. Consenti l'accesso alla webcam quando il browser lo richiede.
+2. Mostra la mano alla webcam per ruotare l'albero a mezz'aria; chiudi il pugno per ricomporlo.
+3. Clicca su qualsiasi foto polaroid o fai il gesto del pizzico (👌) mentre il cursore è sopra di essa.
