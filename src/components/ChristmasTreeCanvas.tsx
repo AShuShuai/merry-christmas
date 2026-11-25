@@ -20,12 +20,23 @@ function rand(max: number, min: number = 0): number {
   return min + Math.random() * (max - min);
 }
 
-function edgePos(w: number, h: number): [number, number] {
-  const e = Math.random();
-  if (e < 0.25) return [rand(w * 1.2, -w * 0.1), rand(-h * 0.12, -h * 0.02)];
-  if (e < 0.5) return [rand(w * 1.2, -w * 0.1), rand(h * 1.12, h * 1.02)];
-  if (e < 0.75) return [rand(-w * 0.12, -w * 0.02), rand(h * 1.2, -h * 0.2)];
-  return [rand(w * 1.02, w * 1.12), rand(h * 1.2, -h * 0.2)];
+function energyCloudPos(w: number, h: number): [number, number] {
+  const angle = Math.random() * TAU;
+  const phase = Math.random() * TAU;
+  const radius = Math.min(w, h) * (0.12 + Math.pow(Math.random(), 0.62) * 0.42);
+  const unevenEdge =
+    0.72 +
+    Math.sin(angle * 3 + phase) * 0.2 +
+    Math.sin(angle * 6 - phase * 1.4) * 0.12 +
+    Math.cos(angle * 11 + phase * 0.7) * 0.08;
+  const centerX = w * (0.5 + (Math.random() - 0.5) * 0.14);
+  const centerY = h * (0.52 + (Math.random() - 0.5) * 0.16);
+  const swirlRadius = radius * Math.max(0.28, unevenEdge);
+
+  return [
+    centerX + Math.cos(angle) * swirlRadius,
+    centerY + Math.sin(angle) * swirlRadius * (0.62 + Math.random() * 0.44),
+  ];
 }
 
 export interface CanvasHandle {
@@ -86,6 +97,10 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
   const lastPointerRef = useRef({ x: 0, y: 0 });
 
   const currentTheme = THEMES[settings.themeId] || THEMES.frozen;
+  const settingsRef = useRef(settings);
+  const currentThemeRef = useRef(currentTheme);
+  settingsRef.current = settings;
+  currentThemeRef.current = currentTheme;
 
   const gestureRef = useRef({ dx: gestureDeltaX, dy: gestureDeltaY });
   useEffect(() => {
@@ -102,13 +117,14 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
     const { w, h } = dimRef.current;
     if (w === 0 || h === 0) return;
 
-    const palette = currentTheme.palette;
+    const sceneSettings = settingsRef.current;
+    const palette = currentThemeRef.current.palette;
 
     // 1. Tree Helix Points
     const pts: TreePoint[] = [];
-    const total = settings.totalPoints;
-    const strings = settings.strings;
-    const turns = settings.turns;
+    const total = sceneSettings.totalPoints;
+    const strings = sceneSettings.strings;
+    const turns = sceneSettings.turns;
 
     for (let i = 0; i < total; i++) {
       const st = i % strings;
@@ -116,7 +132,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
       const radius = 6.9 * Math.pow(1 - t, 0.85) + 0.45;
       const ang = t * turns * TAU + (st * TAU) / strings;
       const j = 0.14;
-      const ep = edgePos(w, h);
+      const ep = energyCloudPos(w, h);
       const ornament = Math.random() < 0.035;
 
       // Generate dispersed cloud target coordinates for Chaos mode
@@ -148,7 +164,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
 
     // 2. Orbiting Points (Fairy dust)
     const orbits: OrbitPoint[] = [];
-    for (let o = 0; o < settings.orbitCount; o++) {
+    for (let o = 0; o < sceneSettings.orbitCount; o++) {
       orbits.push({
         a0: rand(TAU),
         r: rand(7.6, 2.2),
@@ -164,7 +180,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
 
     // 3. Sparkles
     const spk: Sparkle[] = [];
-    for (let s = 0; s < settings.sparkleCount; s++) {
+    for (let s = 0; s < sceneSettings.sparkleCount; s++) {
       spk.push({
         x: rand(w, -w * 0.1),
         y: rand(h, -h * 0.2),
@@ -178,7 +194,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
 
     // 4. Petals
     const pet: Petal[] = [];
-    for (let p = 0; p < settings.petalCount; p++) {
+    for (let p = 0; p < sceneSettings.petalCount; p++) {
       pet.push({
         x: rand(w),
         y: rand(h),
@@ -193,7 +209,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
 
     // 5. Meteors
     const met: Meteor[] = [];
-    for (let m = 0; m < settings.meteorCount; m++) {
+    for (let m = 0; m < sceneSettings.meteorCount; m++) {
       met.push({
         t0: rand(9),
         dur: 1.1,
@@ -204,7 +220,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
       });
     }
     meteorsRef.current = met;
-  }, [currentTheme, settings.totalPoints, settings.strings, settings.turns, settings.orbitCount, settings.sparkleCount, settings.petalCount, settings.meteorCount]);
+  }, []);
 
   // Handle Resize
   const handleResize = useCallback(() => {
@@ -235,11 +251,23 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
     rebuildScene();
   }, [rebuildScene]);
 
-  // Update sprites on theme change
+  // Update scene assets without restarting the animation loop.
   useEffect(() => {
     spritesRef.current = generateSprites(currentTheme.palette);
+  }, [currentTheme]);
+
+  useEffect(() => {
     rebuildScene();
-  }, [currentTheme, rebuildScene]);
+  }, [
+    rebuildScene,
+    settings.totalPoints,
+    settings.strings,
+    settings.turns,
+    settings.orbitCount,
+    settings.sparkleCount,
+    settings.petalCount,
+    settings.meteorCount,
+  ]);
 
   // Expose controls to parent via ref
   useImperativeHandle(ref, () => ({
@@ -341,6 +369,8 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
 
       const { w, h, focal } = dimRef.current;
       const sprites = spritesRef.current;
+      const frameSettings = settingsRef.current;
+      const frameTheme = currentThemeRef.current;
 
       if (w === 0 || h === 0 || sprites.length === 0) {
         animFrameRef.current = requestAnimationFrame(render);
@@ -368,16 +398,17 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
 
       // Camera Angle & Zoom
       const effFocal = focal * zoomRef.current;
-      const autoAngle = settings.autoRotate ? time * settings.rotationSpeed + Math.sin(time * 0.4) * 0.1 : 0;
+      const autoAngle = frameSettings.autoRotate ? time * frameSettings.rotationSpeed + Math.sin(time * 0.4) * 0.1 : 0;
       const yaw = autoAngle + manualRotRef.current.yaw;
       const pitch = manualRotRef.current.pitch;
       const projectFrame = createProjector(yaw, pitch, w, h, effFocal);
 
       // Chaos vs Formed scatter factor (smooth spring interpolation)
-      const targetScatter = settings.treeState === 'dispersed' ? 1 : 0;
-      scatterRef.current += (targetScatter - scatterRef.current) * 0.06;
+      const targetScatter = frameSettings.treeState === 'dispersed' ? 1 : 0;
+      const scatterEase = 1 - Math.exp(-3.7 * dt);
+      scatterRef.current += (targetScatter - scatterRef.current) * scatterEase;
       const scatter = scatterRef.current;
-      if (settings.treeState !== 'formed' || !settings.showStar) {
+      if (frameSettings.treeState !== 'formed' || !frameSettings.showStar) {
         starSequenceRef.current = 0;
       } else if (scatter < 0.06 && intro >= 0.9) {
         starSequenceRef.current += dt;
@@ -392,12 +423,12 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
       // 1. Background
       ctx.globalCompositeOperation = 'source-over';
       ctx.globalAlpha = 1;
-      const gradientKey = `${w}:${h}:${currentTheme.bgGradient.join(':')}`;
+      const gradientKey = `${w}:${h}:${frameTheme.bgGradient.join(':')}`;
       if (backgroundGradientRef.current.key !== gradientKey) {
         const gradient = ctx.createRadialGradient(w / 2, h * 0.45, 0, w / 2, h * 0.45, Math.max(w, h) * 0.75);
-        gradient.addColorStop(0, currentTheme.bgGradient[0]);
-        gradient.addColorStop(0.5, currentTheme.bgGradient[1]);
-        gradient.addColorStop(1, currentTheme.bgGradient[2]);
+        gradient.addColorStop(0, frameTheme.bgGradient[0]);
+        gradient.addColorStop(0.5, frameTheme.bgGradient[1]);
+        gradient.addColorStop(1, frameTheme.bgGradient[2]);
         backgroundGradientRef.current = { key: gradientKey, gradient };
       }
       const bgGrad = backgroundGradientRef.current.gradient;
@@ -427,7 +458,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
       }
 
       // 3. Meteors
-      if (settings.showMeteors) {
+      if (frameSettings.showMeteors) {
         ctx.globalCompositeOperation = 'lighter';
         const meteors = meteorsRef.current;
         for (let i = 0; i < meteors.length; i++) {
@@ -442,7 +473,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
           const a = Math.sin(k * Math.PI);
 
           const lg = ctx.createLinearGradient(tailX, tailY, x, y);
-          const c0 = currentTheme.palette[0];
+          const c0 = frameTheme.palette[0];
           lg.addColorStop(0, `rgba(${c0[0]},${c0[1]},${c0[2]},0)`);
           lg.addColorStop(1, `rgba(255,255,255,${0.9 * a})`);
 
@@ -461,7 +492,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
       }
 
       // 4. Ground Glow
-      if (settings.showGroundGlow) {
+      if (frameSettings.showGroundGlow) {
         const pGlow = projectFrame(0, -10.2, 0);
         ctx.save();
         ctx.globalCompositeOperation = 'lighter';
@@ -470,9 +501,9 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         const pulse = 1 + 0.14 * Math.sin(time * 1.6);
         const R = effFocal * 0.44 * pulse;
         const gg = ctx.createRadialGradient(0, 0, 0, 0, 0, R);
-        gg.addColorStop(0, currentTheme.groundGlow.inner);
-        gg.addColorStop(0.45, currentTheme.groundGlow.mid);
-        gg.addColorStop(1, currentTheme.groundGlow.outer);
+        gg.addColorStop(0, frameTheme.groundGlow.inner);
+        gg.addColorStop(0.45, frameTheme.groundGlow.mid);
+        gg.addColorStop(1, frameTheme.groundGlow.outer);
         ctx.globalAlpha = Math.max(0, 1 - scatter * 1.5);
         ctx.fillStyle = gg;
         ctx.beginPath();
@@ -484,8 +515,8 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
       // 5. Tree Points
       ctx.globalCompositeOperation = 'lighter';
       const pts = treePointsRef.current;
-      const breathe = settings.breatheEffect ? 1 + 0.07 * Math.sin(time * 0.9) : 1;
-      const heartbeat = settings.breatheEffect ? 0.9 + 0.1 * Math.pow(Math.max(0, Math.sin(time * 1.8)), 6) : 1;
+      const breathe = frameSettings.breatheEffect ? 1 + 0.07 * Math.sin(time * 0.9) : 1;
+      const heartbeat = frameSettings.breatheEffect ? 0.9 + 0.1 * Math.pow(Math.max(0, Math.sin(time * 1.8)), 6) : 1;
 
       for (let i = 0; i < pts.length; i++) {
         const pt = pts[i];
@@ -500,9 +531,11 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         let cx = pt.sx + (px - pt.sx) * intro;
         let cy = pt.sy + (py - pt.sy) * intro;
 
-        const drift = (1 - intro) * 6;
-        cx += Math.sin(time * 2.5 + pt.phase) * drift;
-        cy += Math.cos(time * 2.1 + pt.phase) * drift;
+        const gathering = 1 - intro;
+        const drift = gathering * Math.min(w, h) * 0.045;
+        const swirl = pt.phase + time * (1.5 + pt.t);
+        cx += Math.sin(swirl) * drift;
+        cy += Math.cos(swirl * 1.35) * drift * 0.72;
 
         let depth = (p.z + 8) / 15;
         if (depth < 0) depth = 0;
@@ -556,7 +589,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
       }
 
       // 6. Orbiting Points (fairy dust)
-      if (settings.showOrbits) {
+      if (frameSettings.showOrbits) {
         ctx.globalCompositeOperation = 'lighter';
         const orbits = orbitPointsRef.current;
         for (let i = 0; i < orbits.length; i++) {
@@ -573,7 +606,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
       }
 
       // 7. Falling Petals
-      if (settings.showPetals) {
+      if (frameSettings.showPetals) {
         ctx.globalCompositeOperation = 'source-over';
         const petals = petalsRef.current;
         for (let i = 0; i < petals.length; i++) {
@@ -589,7 +622,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
           ctx.translate(p.x, p.y);
           ctx.rotate(p.rot);
           ctx.globalAlpha = 0.55;
-          ctx.fillStyle = currentTheme.petalColor;
+          ctx.fillStyle = frameTheme.petalColor;
           ctx.beginPath();
           ctx.ellipse(0, 0, p.r, p.r * 0.55, 0, 0, TAU);
           ctx.fill();
@@ -601,8 +634,8 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
       const starSequenceTime = starSequenceRef.current;
       const gatherDuration = 0.4;
       if (
-        settings.showStar &&
-        settings.treeState === 'formed' &&
+        frameSettings.showStar &&
+        frameSettings.treeState === 'formed' &&
         starSequenceTime > 0 &&
         starSequenceTime < gatherDuration
       ) {
@@ -642,7 +675,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
 
       const starAppearDuration = 0.2;
       const starReveal = Math.max(0, Math.min(1, (starSequenceTime - gatherDuration) / starAppearDuration));
-      if (settings.showStar && settings.treeState === 'formed' && starReveal > 0) {
+      if (frameSettings.showStar && frameSettings.treeState === 'formed' && starReveal > 0) {
         const appearScale = 0.2 + 0.8 * (1 - Math.pow(1 - starReveal, 3));
         const pStar = projectFrame(0, 7.7, 0);
         const pulse = 1 + 0.14 * Math.sin(time * 3.2);
@@ -654,9 +687,9 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
 
         const R = effFocal * 0.22;
         const gStar = ctx.createRadialGradient(0, 0, 0, 0, 0, R);
-        gStar.addColorStop(0, currentTheme.star.inner);
-        gStar.addColorStop(0.12, currentTheme.star.mid);
-        gStar.addColorStop(0.4, currentTheme.star.outer);
+        gStar.addColorStop(0, frameTheme.star.inner);
+        gStar.addColorStop(0.12, frameTheme.star.mid);
+        gStar.addColorStop(0.4, frameTheme.star.outer);
         gStar.addColorStop(1, 'rgba(0,0,0,0)');
         ctx.fillStyle = gStar;
         ctx.beginPath();
@@ -695,8 +728,8 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
           else ctx.lineTo(sx, sy);
         }
         ctx.closePath();
-        ctx.fillStyle = currentTheme.star.star;
-        ctx.shadowColor = currentTheme.star.glow;
+        ctx.fillStyle = frameTheme.star.star;
+        ctx.shadowColor = frameTheme.star.glow;
         ctx.shadowBlur = 45;
         ctx.fill();
         ctx.restore();
@@ -728,7 +761,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
       }
 
       // 10. Greeting Text
-      if (settings.showGreeting && settings.greetingText.trim().length > 0) {
+      if (frameSettings.showGreeting && frameSettings.greetingText.trim().length > 0) {
         ctx.globalCompositeOperation = 'source-over';
         ctx.globalAlpha = 1;
         ctx.textAlign = 'center';
@@ -736,9 +769,9 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
 
         const size = Math.max(34, Math.min(88, w * 0.075));
         let fontStr = `italic bold ${size}px "Brush Script MT", "Great Vibes", "Segoe Script", cursive`;
-        if (settings.greetingFont === 'serif') {
+        if (frameSettings.greetingFont === 'serif') {
           fontStr = `italic 800 ${size}px "Playfair Display", Georgia, serif`;
-        } else if (settings.greetingFont === 'cinzel') {
+        } else if (frameSettings.greetingFont === 'cinzel') {
           fontStr = `800 ${size * 0.85}px "Cinzel", "Times New Roman", serif`;
         }
 
@@ -747,16 +780,16 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         const shift = 0.5 + 0.5 * Math.sin(time * 0.9);
 
         const textGrad = ctx.createLinearGradient(0, textY - size / 2, 0, textY + size / 2);
-        const [g0, g1, g2, g3] = currentTheme.greetingGradient;
+        const [g0, g1, g2, g3] = frameTheme.greetingGradient;
         textGrad.addColorStop(0, g0);
         textGrad.addColorStop(0.35 + shift * 0.2, g1);
         textGrad.addColorStop(0.7, g2);
         textGrad.addColorStop(1, g3);
 
         ctx.fillStyle = textGrad;
-        ctx.shadowColor = currentTheme.greetingGlow;
+        ctx.shadowColor = frameTheme.greetingGlow;
         ctx.shadowBlur = 28 + 12 * Math.sin(time * 2);
-        ctx.fillText(settings.greetingText, w / 2, textY);
+        ctx.fillText(frameSettings.greetingText, w / 2, textY);
         ctx.shadowBlur = 0;
       }
 
@@ -769,7 +802,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
       cancelAnimationFrame(animFrameRef.current);
       window.removeEventListener('resize', handleResize);
     };
-  }, [handleResize, currentTheme, settings]);
+  }, [handleResize]);
 
   const handleWheel = (e: React.WheelEvent) => {
     zoomRef.current = Math.max(0.6, Math.min(2.0, zoomRef.current - e.deltaY * 0.001));

@@ -11,7 +11,7 @@ interface Props {
   gestureState: HandGestureState;
 }
 
-export const HandTrackingWebcam: React.FC<Props> = ({
+export const HandTrackingWebcam = React.memo<Props>(({
   enabled,
   visible,
   onToggle,
@@ -128,4 +128,12 @@ export const HandTrackingWebcam: React.FC<Props> = ({
       </div>
     </div>
   );
-};
+}, (previous, next) =>
+  previous.enabled === next.enabled &&
+  previous.visible === next.visible &&
+  previous.onToggle === next.onToggle &&
+  previous.onGesture === next.onGesture &&
+  previous.gestureState.hasHand === next.gestureState.hasHand &&
+  previous.gestureState.gesture === next.gestureState.gesture &&
+  previous.gestureState.isPinching === next.gestureState.isPinching
+);

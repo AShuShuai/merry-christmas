@@ -10,6 +10,7 @@ class HandTrackerEngine {
   private isRunning: boolean = false;
   private animFrameId: number | null = null;
   private lastVideoTime: number = -1;
+  private lastInferenceTime: number = 0;
   private generation: number = 0;
   private initPromise: Promise<InitResult> | null = null;
 
@@ -69,6 +70,7 @@ class HandTrackerEngine {
     this.canvasEl = canvas;
     this.onGestureCallback = onGesture;
     this.lastVideoTime = -1;
+    this.lastInferenceTime = 0;
 
     try {
       if (!this.handLandmarker) {
@@ -97,6 +99,7 @@ class HandTrackerEngine {
         video: {
           width: { ideal: 640 },
           height: { ideal: 480 },
+          frameRate: { ideal: 30, max: 30 },
           facingMode: 'user',
         },
       });
@@ -158,6 +161,7 @@ class HandTrackerEngine {
     this.pinchStartFrames = 0;
     this.pinchReleaseFrames = 0;
     this.lastVideoTime = -1;
+    this.lastInferenceTime = 0;
     this.smoothDeltaX = 0;
     this.smoothDeltaY = 0;
   }
@@ -166,9 +170,14 @@ class HandTrackerEngine {
     const loop = () => {
       if (!this.isRunning || !this.videoEl || !this.handLandmarker) return;
 
-      if (this.videoEl.readyState >= 2 && this.videoEl.currentTime !== this.lastVideoTime) {
+      const nowInMs = performance.now();
+      if (
+        this.videoEl.readyState >= 2 &&
+        this.videoEl.currentTime !== this.lastVideoTime &&
+        nowInMs - this.lastInferenceTime >= 1000 / 30
+      ) {
         this.lastVideoTime = this.videoEl.currentTime;
-        const nowInMs = performance.now();
+        this.lastInferenceTime = nowInMs;
         const results: HandLandmarkerResult = this.handLandmarker.detectForVideo(
           this.videoEl,
           nowInMs
