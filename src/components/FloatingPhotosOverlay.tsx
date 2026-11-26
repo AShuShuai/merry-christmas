@@ -3,12 +3,24 @@ import { MemoryPhoto, HandGestureState, PhotoTransitionOrigin } from '../types';
 import { project } from '../engine/projection';
 import { chimeAudio } from '../utils/audio';
 
-const TAU = Math.PI * 2;
+const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
 
-function getPhotoOrigin(element: HTMLElement | null | undefined): PhotoTransitionOrigin | undefined {
+interface OrbitPosition {
+  x: number;
+  y: number;
+  phase: number;
+}
+
+function getPhotoOrigin(
+  element: HTMLElement | null | undefined,
+  x: number,
+  y: number,
+  z: number,
+  scale: number
+): PhotoTransitionOrigin | undefined {
   if (!element) return undefined;
   const { left, top, width, height } = element.getBoundingClientRect();
-  return { left, top, width, height };
+  return { left, top, width, height, x, y, z, scale };
 }
 
 interface Props {
@@ -49,17 +61,30 @@ export const FloatingPhotosOverlay: React.FC<Props> = ({
   onRequestClosePhoto,
 }) => {
   const pinchOpenDistanceRef = useRef<number | null>(null);
-  const dispersedPositionsRef = useRef<Map<string, { x: number; y: number }>>(new Map());
   const photoCardElementsRef = useRef<Map<string, HTMLDivElement>>(new Map());
-  const photoOrbitOffsetsRef = useRef<Map<string, number>>(new Map());
-  const pausedPhotoOrbitRef = useRef<{ photoId: string; angle: number } | null>(null);
-  const orbitStartTimeRef = useRef<number | null>(null);
-  const photoIdsRef = useRef<string>('');
-
-  if (orbitStartTimeRef.current === null) {
-    orbitStartTimeRef.current = performance.now();
-  }
-  const orbitTime = (performance.now() - orbitStartTimeRef.current) / 1000;
+  const photoOrbitPositionsRef = useRef<Map<string, OrbitPosition>>(new Map());
+  const photoIdsRef = useRef('');
+  const frameStateRef = useRef({
+    lastTime: performance.now(),
+    orbitTime: 0,
+    yaw,
+    pitch,
+  });
+  const frameState = frameStateRef.current;
+  const now = performance.now();
+  const deltaTime = Math.min(0.05, Math.max(0, (now - frameState.lastTime) / 1000));
+  frameState.lastTime = now;
+  frameState.orbitTime += deltaTime;
+  const yawDelta = Math.atan2(
+    Math.sin(yaw - frameState.yaw),
+    Math.cos(yaw - frameState.yaw)
+  );
+  const damping = 1 - Math.exp(-deltaTime * 8);
+  frameState.yaw += yawDelta * damping;
+  frameState.pitch += (pitch - frameState.pitch) * damping;
+  const orbitTime = frameState.orbitTime;
+  const smoothedYaw = frameState.yaw;
+  const smoothedPitch = frameState.pitch;
   const orbitSpeed = 0.065;
 
   const cursorScreenX = gestureState.cursorX * width;
@@ -71,141 +96,102 @@ export const FloatingPhotosOverlay: React.FC<Props> = ({
   const photosReady = introProgress >= 1 && treeIsDispersed && scatter >= 0.58;
   const photoIds = photos.map((photo) => photo.id).join('|');
   if (photoIdsRef.current !== photoIds) {
-    const positions = new Map<string, { x: number; y: number }>();
+    const positions = new Map<string, OrbitPosition>();
     photos.forEach((photo, index) => {
-      const angle = -Math.PI / 2 + (index * TAU) / Math.max(photos.length, 1);
-      positions.set(photo.id, { x: Math.cos(angle), y: Math.sin(angle) });
+      const spiralRadius = 0.84 + 0.14 * ((index + 0.5) / Math.max(photos.length, 1));
+      const angle = index * GOLDEN_ANGLE;
+      positions.set(photo.id, {
+        x: Math.cos(angle) * spiralRadius,
+        y: Math.sin(angle) * spiralRadius,
+        phase: angle,
+      });
     });
-    dispersedPositionsRef.current = positions;
+    photoOrbitPositionsRef.current = positions;
     photoIdsRef.current = photoIds;
   }
 
-  const getPhotoBaseAngle = (photoId: string): number => {
-    const position = dispersedPositionsRef.current.get(photoId);
-    return position ? Math.atan2(position.y, position.x) : 0;
-  };
-
-  if (isPhotoOpen && selectedPhotoId) {
-    if (pausedPhotoOrbitRef.current?.photoId !== selectedPhotoId) {
-      const previousPause = pausedPhotoOrbitRef.current;
-      if (previousPause) {
-        const previousPhoto = photos.find((photo) => photo.id === previousPause.photoId);
-        if (previousPhoto) {
-          photoOrbitOffsetsRef.current.set(
-            previousPhoto.id,
-            previousPause.angle - previousPhoto.angle - orbitTime * orbitSpeed
-          );
-        }
-      }
-
-      const selectedPhoto = photos.find((photo) => photo.id === selectedPhotoId);
-      if (selectedPhoto) {
-        pausedPhotoOrbitRef.current = {
-          photoId: selectedPhotoId,
-          angle:
-            getPhotoBaseAngle(selectedPhotoId) +
-            orbitTime * orbitSpeed +
-            (photoOrbitOffsetsRef.current.get(selectedPhotoId) ?? 0),
-        };
-      }
-    }
-  } else if (pausedPhotoOrbitRef.current) {
-    const pausedPhoto = photos.find(
-      (photo) => photo.id === pausedPhotoOrbitRef.current?.photoId
-    );
-    if (pausedPhoto) {
-      photoOrbitOffsetsRef.current.set(
-        pausedPhoto.id,
-        pausedPhotoOrbitRef.current.angle -
-          getPhotoBaseAngle(pausedPhoto.id) -
-          orbitTime * orbitSpeed
-      );
-    }
-    pausedPhotoOrbitRef.current = null;
-  }
-
-  const projectedCards = photos.map((photo) => {
-    // Keep memories outside the tree silhouette, while letting them spread in chaos mode.
+  const cardBaseWidth = width < 640 ? 88 : 104;
+  const orbitRadius = Math.min(width * 0.36, height * 0.34);
+  const rawProjectedCards = photos.map((photo) => {
+    const position = photoOrbitPositionsRef.current.get(photo.id)!;
+    const angle = orbitTime * orbitSpeed - smoothedYaw;
+    const cosAngle = Math.cos(angle);
+    const sinAngle = Math.sin(angle);
+    const orbitX = position.x * cosAngle - position.y * sinAngle;
+    const orbitY = position.x * sinAngle + position.y * cosAngle;
+    const bob = Math.sin(orbitTime * 0.8 + position.phase) * 0.025;
+    const orbitZ = Math.sin(angle + position.phase);
+    const screenX = width / 2 + orbitX * orbitRadius;
+    const screenY = height / 2 + (orbitY + bob) * orbitRadius;
     const effRadius = (photo.radius + 2.5) * (1 + scatter * 0.4);
-    const baseAngle = getPhotoBaseAngle(photo.id);
-    const pausedOrbit = pausedPhotoOrbitRef.current;
-    const orbitAngle =
-      pausedOrbit?.photoId === photo.id
-        ? pausedOrbit.angle
-        : baseAngle +
-          orbitTime * orbitSpeed +
-          (photoOrbitOffsetsRef.current.get(photo.id) ?? 0);
-    const angle = orbitAngle - yaw;
-    const px = Math.cos(angle) * effRadius;
-    const py = photo.y * (1 + scatter * 0.2);
-    const pz = Math.sin(angle) * effRadius;
-
-    const proj = project(px, py, pz, yaw, pitch, width, height, focal);
-
-    const cardBaseWidth = width < 640 ? 88 : 104;
-    const orbitRadiusX = width * 0.28;
-    const orbitRadiusY = height * 0.2;
-    const minCenterSpacing =
-      photos.length > 1
-        ? 2 * Math.min(orbitRadiusX, orbitRadiusY) * Math.sin(Math.PI / photos.length)
-        : cardBaseWidth;
-    const dispersedWidth = Math.min(cardBaseWidth * 0.48, minCenterSpacing * 0.7);
-    const formedScale = Math.max(0.14, Math.min(0.18, proj.scale * 0.006));
-    const dispersedScale = dispersedWidth / cardBaseWidth;
-    const layoutProgress = 1;
-    const scale = formedScale + (dispersedScale - formedScale) * layoutProgress;
-    const dispersedX = width / 2 + Math.cos(orbitAngle) * orbitRadiusX;
-    const dispersedY = height / 2 + Math.sin(orbitAngle) * orbitRadiusY;
-    const targetX = proj.x + (dispersedX - proj.x) * layoutProgress;
-    const targetY = proj.y + (dispersedY - proj.y) * layoutProgress;
-    const screenX = Math.min(width - 64 * scale, Math.max(64 * scale, targetX));
-    const screenY = Math.min(height - 54 * scale, Math.max(54 * scale, targetY));
-
-    // Front/back depth calculation
-    const isFront = proj.z > -3.5;
-    const cardWidth = cardBaseWidth * scale;
-    const isUnderCursor =
-      layoutProgress > 0.95 &&
-      Math.abs(screenX - cursorScreenX) <= cardWidth * 0.9 &&
-      Math.abs(screenY - cursorScreenY) <= 82 * scale + 18;
-
-    return {
-      photo,
-      proj,
-      layoutProgress,
-      screenX,
-      screenY,
-      scale,
-      isFront,
-      isUnderCursor,
-    };
-  }).sort((a, b) => a.proj.z - b.proj.z);
-  const photoUnderCursor =
-    [...projectedCards].reverse().find((card) => card.isUnderCursor)?.photo ?? null;
-
-  useEffect(() => {
-    photoOrbitOffsetsRef.current = new Map(
-      [...photoOrbitOffsetsRef.current].filter(([id]) => photos.some((photo) => photo.id === id))
+    const proj = project(
+      orbitX * effRadius,
+      (orbitY + bob) * effRadius,
+      orbitZ * effRadius,
+      smoothedYaw,
+      smoothedPitch,
+      width,
+      height,
+      focal
     );
-  }, [photos]);
+
+    return { photo, proj, screenX, screenY };
+  });
+  const nearestSpacing = new Map<string, number>();
+  rawProjectedCards.forEach((card, index) => {
+    let nearest = Number.POSITIVE_INFINITY;
+    rawProjectedCards.forEach((other, otherIndex) => {
+      if (index === otherIndex) return;
+      nearest = Math.min(
+        nearest,
+        Math.hypot(card.screenX - other.screenX, card.screenY - other.screenY)
+      );
+    });
+    nearestSpacing.set(card.photo.id, nearest);
+  });
+  const projectedCards = rawProjectedCards.map((card) => {
+    const spacing = nearestSpacing.get(card.photo.id) ?? Number.POSITIVE_INFINITY;
+    const scale = Math.min(
+      0.58,
+      Number.isFinite(spacing) ? (spacing * 0.58) / cardBaseWidth : 0.58
+    );
+    const cardWidth = cardBaseWidth * scale;
+    const isFront = card.proj.z > -3.5;
+    const isUnderCursor =
+      Math.abs(card.screenX - cursorScreenX) <= cardWidth * 0.9 &&
+      Math.abs(card.screenY - cursorScreenY) <= cardWidth * 0.85 + 18;
+
+    return { ...card, scale, isFront, isUnderCursor };
+  }).sort((a, b) => a.proj.z - b.proj.z);
+  const photoUnderCursorCard =
+    [...projectedCards].reverse().find((card) => card.isUnderCursor) ?? null;
+  const photoUnderCursor = photoUnderCursorCard?.photo ?? null;
+  const selectedCard = projectedCards.find((card) => card.photo.id === selectedPhotoId);
 
   useEffect(() => {
     if (!isPhotoOpen || !selectedPhotoId) return;
-    const origin = getPhotoOrigin(photoCardElementsRef.current.get(selectedPhotoId));
+    const origin = getPhotoOrigin(
+      photoCardElementsRef.current.get(selectedPhotoId),
+      selectedCard?.screenX ?? width / 2,
+      selectedCard?.screenY ?? height / 2,
+      selectedCard?.proj.z ?? 0,
+      selectedCard?.scale ?? 1
+    );
     if (origin) onPhotoOriginUpdate(selectedPhotoId, origin);
   }, [
     isPhotoOpen,
     selectedPhotoId,
-    yaw,
-    pitch,
+    orbitTime,
     width,
     height,
-    scatter,
-    photos,
+    selectedCard?.screenX,
+    selectedCard?.screenY,
+    selectedCard?.proj.z,
+    selectedCard?.scale,
     onPhotoOriginUpdate,
   ]);
 
-  // Each pinch opens a not-yet-seen memory until a full randomized cycle has completed.
+  // A pinch selects the visible photo under the cursor.
   useEffect(() => {
     const isPinching = gestureState.hasHand &&
       gestureState.gesture === 'pinch' &&
@@ -245,7 +231,13 @@ export const FloatingPhotosOverlay: React.FC<Props> = ({
       chimeAudio.playChime(1046.5, 0.15);
       onSelectPhoto(
         photoUnderCursor,
-        getPhotoOrigin(photoCardElementsRef.current.get(photoUnderCursor.id))
+        getPhotoOrigin(
+          photoCardElementsRef.current.get(photoUnderCursor.id),
+          photoUnderCursorCard?.screenX ?? width / 2,
+          photoUnderCursorCard?.screenY ?? height / 2,
+          photoUnderCursorCard?.proj.z ?? 0,
+          photoUnderCursorCard?.scale ?? 1
+        )
       );
     }
   }, [
@@ -308,7 +300,7 @@ export const FloatingPhotosOverlay: React.FC<Props> = ({
       )}
 
       {/* 3D Floating Memory Polaroid Cards */}
-      {projectedCards.map(({ photo, proj, layoutProgress, screenX, screenY, scale: baseScale, isFront, isUnderCursor }) => {
+      {projectedCards.map(({ photo, proj, screenX, screenY, scale: baseScale, isFront, isUnderCursor }) => {
         // If card is too far behind, hide or make deeply faded
         const depthOpacity = photosReady
           ? 1
@@ -332,7 +324,10 @@ export const FloatingPhotosOverlay: React.FC<Props> = ({
             key={photo.id}
             onClick={(event) => {
               chimeAudio.playChime(1046.5, 0.15);
-              onSelectPhoto(photo, getPhotoOrigin(event.currentTarget));
+              onSelectPhoto(
+                photo,
+                getPhotoOrigin(event.currentTarget, screenX, screenY, proj.z, scale)
+              );
             }}
             ref={(element) => {
               if (element) photoCardElementsRef.current.set(photo.id, element);
@@ -347,12 +342,9 @@ export const FloatingPhotosOverlay: React.FC<Props> = ({
               transform: `translate(-50%, -50%) scale(${scale})`,
               opacity,
               transition: isSelectedPhotoOpen && isPhotoClosing
-                ? 'left 40ms linear, top 40ms linear, opacity 220ms ease 540ms, transform 120ms ease-out'
-                : 'left 40ms linear, top 40ms linear, opacity 220ms ease, transform 120ms ease-out',
-              pointerEvents:
-                photosReady && !isSelectedPhotoOpen && layoutProgress > 0.95
-                  ? 'auto'
-                  : 'none',
+                ? 'opacity 180ms ease, transform 120ms ease-out'
+                : 'opacity 220ms ease, transform 120ms ease-out',
+              pointerEvents: photosReady && !isSelectedPhotoOpen ? 'auto' : 'none',
             }}
           >
             <div

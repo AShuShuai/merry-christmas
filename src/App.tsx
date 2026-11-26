@@ -245,6 +245,7 @@ export const App: React.FC = () => {
 
       {/* Fullscreen Photo Lightbox Modal */}
       <PhotoLightbox
+        key={selectedPhoto?.id ?? 'closed'}
         photo={selectedPhoto}
         origin={photoOrigin}
         getCurrentOrigin={getCurrentPhotoOrigin}

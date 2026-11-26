@@ -43,6 +43,10 @@ export interface PhotoTransitionOrigin {
   top: number;
   width: number;
   height: number;
+  x: number;
+  y: number;
+  z: number;
+  scale: number;
 }
 
 export interface HandGestureState {
