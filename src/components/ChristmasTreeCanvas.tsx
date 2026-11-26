@@ -39,6 +39,346 @@ function energyCloudPos(w: number, h: number): [number, number] {
   ];
 }
 
+interface GiftModel {
+  x: number;
+  z: number;
+  baseY: number;
+  width: number;
+  height: number;
+  depth: number;
+  body: string;
+  ribbon: string;
+  side: string;
+  yaw: number;
+  tiltX: number;
+  tiltZ: number;
+  phase: number;
+}
+
+function createGiftModels(): GiftModel[] {
+  const range = (min: number, max: number) => min + Math.random() * (max - min);
+  const colors = [
+    { body: '#a51f36', side: '#6f1728', ribbon: '#f4d36d' },
+    { body: '#187845', side: '#0d4c30', ribbon: '#f7e4a0' },
+    { body: '#c6383d', side: '#84232c', ribbon: '#f6d573' },
+  ];
+  const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+  const startingAngle = range(0, TAU);
+  const count = 9;
+
+  return Array.from({ length: count }, (_, index) => {
+    const color = colors[Math.floor(range(0, colors.length))];
+    const angle = startingAngle + index * goldenAngle + range(-0.42, 0.42);
+    const radius = 1.8 + Math.sqrt((index + Math.random()) / count) * 6.3;
+    return {
+      x: Math.cos(angle) * radius,
+      z: Math.sin(angle) * radius,
+      baseY: -9.45 + range(-0.42, 0.28),
+      width: range(0.72, 1.6),
+      height: range(0.62, 1.55),
+      depth: range(0.68, 1.55),
+      body: color.body,
+      side: color.side,
+      ribbon: color.ribbon,
+      yaw: range(0, TAU),
+      tiltX: range(-0.16, 0.16),
+      tiltZ: range(-0.13, 0.13),
+      phase: range(0, TAU),
+    };
+  });
+}
+
+const GIFT_MODELS = createGiftModels();
+
+type Projector = (x: number, y: number, z: number) => { x: number; y: number; z: number; scale: number };
+
+function drawGiftModels(
+  ctx: CanvasRenderingContext2D,
+  projectFrame: Projector,
+  sprites: HTMLCanvasElement[],
+  time: number,
+  intro: number,
+  scatter: number,
+  width: number,
+  height: number
+) {
+  if (intro <= 0) return;
+
+  const scatterProgress = Math.max(0, Math.min(1, scatter));
+  const gifts = GIFT_MODELS.map((gift, index) => {
+    const bob = Math.sin(time * 0.85 + gift.phase) * 0.045;
+    const centerY = gift.baseY + gift.height / 2 + bob;
+    const origin = projectFrame(gift.x, centerY, gift.z);
+    const angle = -Math.PI / 2 + ((index + 0.5) * TAU) / GIFT_MODELS.length + time * 0.065;
+    const targetX = width / 2 + Math.cos(angle) * width * 0.28;
+    const targetY = height / 2 + Math.sin(angle) * height * 0.2;
+    const displayX = origin.x + (targetX - origin.x) * scatterProgress;
+    const displayY = origin.y + (targetY - origin.y) * scatterProgress;
+    const yaw = gift.yaw + Math.sin(time * 0.32 + gift.phase) * 0.035;
+    const tiltX = gift.tiltX + Math.sin(time * 0.72 + gift.phase) * 0.025;
+    const tiltZ = gift.tiltZ + Math.cos(time * 0.68 + gift.phase) * 0.025;
+    const modelScale = 0.48 * (1 - scatterProgress * 0.45);
+    const screenScale = origin.scale * modelScale;
+    const projectVertex = (vx: number, vy: number, vz: number) => {
+      const cosX = Math.cos(tiltX);
+      const sinX = Math.sin(tiltX);
+      const rotatedY = vy * cosX - vz * sinX;
+      const rotatedZ = vy * sinX + vz * cosX;
+      const cosZ = Math.cos(tiltZ);
+      const sinZ = Math.sin(tiltZ);
+      const rotatedX = vx * cosZ - rotatedY * sinZ;
+      const tiltedY = vx * sinZ + rotatedY * cosZ;
+      const cosYaw = Math.cos(yaw);
+      const sinYaw = Math.sin(yaw);
+      const worldX = gift.x + rotatedX * cosYaw + rotatedZ * sinYaw;
+      const worldZ = gift.z - rotatedX * sinYaw + rotatedZ * cosYaw;
+      const projected = projectFrame(worldX, centerY + tiltedY, worldZ);
+
+      return {
+        x: displayX + (projected.x - origin.x) * modelScale,
+        y: displayY + (projected.y - origin.y) * modelScale,
+        z: projected.z,
+      };
+    };
+
+    const halfWidth = gift.width / 2;
+    const halfHeight = gift.height / 2;
+    const halfDepth = gift.depth / 2;
+    const faces = [
+      {
+        color: gift.body,
+        vertices: [
+          [-halfWidth, -halfHeight, halfDepth],
+          [halfWidth, -halfHeight, halfDepth],
+          [halfWidth, halfHeight, halfDepth],
+          [-halfWidth, halfHeight, halfDepth],
+        ],
+      },
+      {
+        color: gift.side,
+        vertices: [
+          [halfWidth, -halfHeight, -halfDepth],
+          [-halfWidth, -halfHeight, -halfDepth],
+          [-halfWidth, halfHeight, -halfDepth],
+          [halfWidth, halfHeight, -halfDepth],
+        ],
+      },
+      {
+        color: gift.side,
+        vertices: [
+          [-halfWidth, -halfHeight, -halfDepth],
+          [-halfWidth, -halfHeight, halfDepth],
+          [-halfWidth, halfHeight, halfDepth],
+          [-halfWidth, halfHeight, -halfDepth],
+        ],
+      },
+      {
+        color: gift.side,
+        vertices: [
+          [halfWidth, -halfHeight, halfDepth],
+          [halfWidth, -halfHeight, -halfDepth],
+          [halfWidth, halfHeight, -halfDepth],
+          [halfWidth, halfHeight, halfDepth],
+        ],
+      },
+      {
+        color: '#e6b958',
+        vertices: [
+          [-halfWidth, halfHeight, halfDepth],
+          [halfWidth, halfHeight, halfDepth],
+          [halfWidth, halfHeight, -halfDepth],
+          [-halfWidth, halfHeight, -halfDepth],
+        ],
+      },
+      {
+        color: '#3e2630',
+        vertices: [
+          [-halfWidth, -halfHeight, -halfDepth],
+          [halfWidth, -halfHeight, -halfDepth],
+          [halfWidth, -halfHeight, halfDepth],
+          [-halfWidth, -halfHeight, halfDepth],
+        ],
+      },
+    ].map((face) => {
+      const points = face.vertices.map(([x, y, z]) => projectVertex(x, y, z));
+      return {
+        color: face.color,
+        points,
+        depth: points.reduce((sum, point) => sum + point.z, 0) / points.length,
+      };
+    }).sort((a, b) => a.depth - b.depth);
+
+    return {
+      gift,
+      projectVertex,
+      faces,
+      depth: origin.z,
+      screenScale,
+      halfWidth,
+      halfHeight,
+      halfDepth,
+    };
+  }).sort((a, b) => a.depth - b.depth);
+
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = intro;
+  gifts.forEach(({ gift, projectVertex, faces, screenScale, halfWidth, halfHeight, halfDepth }) => {
+    const base = projectVertex(0, -halfHeight, 0);
+    ctx.save();
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.24)';
+    ctx.beginPath();
+    ctx.ellipse(base.x, base.y + screenScale * 0.08, screenScale * gift.width * 0.34, screenScale * gift.depth * 0.22, 0, 0, TAU);
+    ctx.fill();
+
+    faces.forEach(({ color, points }) => {
+      ctx.beginPath();
+      points.forEach((point, index) => {
+        if (index === 0) ctx.moveTo(point.x, point.y);
+        else ctx.lineTo(point.x, point.y);
+      });
+      ctx.closePath();
+      ctx.fillStyle = color;
+      ctx.shadowColor = '#ffd36e';
+      ctx.shadowBlur = Math.max(1.2, screenScale * 0.16);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = 'rgba(255, 226, 155, 0.42)';
+      ctx.lineWidth = Math.max(0.6, screenScale * 0.025);
+      ctx.stroke();
+    });
+
+    const ribbonHalfWidth = gift.width * 0.075;
+    const frontRibbon = [
+      [-ribbonHalfWidth, -halfHeight, halfDepth + 0.004],
+      [ribbonHalfWidth, -halfHeight, halfDepth + 0.004],
+      [ribbonHalfWidth, halfHeight, halfDepth + 0.004],
+      [-ribbonHalfWidth, halfHeight, halfDepth + 0.004],
+    ].map(([x, y, z]) => projectVertex(x, y, z));
+    ctx.beginPath();
+    frontRibbon.forEach((point, index) => {
+      if (index === 0) ctx.moveTo(point.x, point.y);
+      else ctx.lineTo(point.x, point.y);
+    });
+    ctx.closePath();
+    ctx.fillStyle = gift.ribbon;
+    ctx.fill();
+
+    const topRibbon = [
+      [-halfWidth, halfHeight + 0.004, -gift.depth * 0.07],
+      [halfWidth, halfHeight + 0.004, -gift.depth * 0.07],
+      [halfWidth, halfHeight + 0.004, gift.depth * 0.07],
+      [-halfWidth, halfHeight + 0.004, gift.depth * 0.07],
+    ].map(([x, y, z]) => projectVertex(x, y, z));
+    ctx.beginPath();
+    topRibbon.forEach((point, index) => {
+      if (index === 0) ctx.moveTo(point.x, point.y);
+      else ctx.lineTo(point.x, point.y);
+    });
+    ctx.closePath();
+    ctx.fillStyle = gift.ribbon;
+    ctx.fill();
+
+    const sparkle = sprites[0];
+    if (sparkle) {
+      const sparkleSize = Math.max(1.5, screenScale * 0.3);
+      const sparklePoint = projectVertex(-halfWidth * 0.42, halfHeight * 0.3, halfDepth + 0.01);
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = 0.7;
+      ctx.drawImage(sparkle, sparklePoint.x - sparkleSize / 2, sparklePoint.y - sparkleSize / 2, sparkleSize, sparkleSize);
+      ctx.globalAlpha = intro;
+      ctx.globalCompositeOperation = 'source-over';
+    }
+    ctx.restore();
+  });
+  ctx.restore();
+}
+
+function drawTreeDecorations(
+  ctx: CanvasRenderingContext2D,
+  projectFrame: Projector,
+  time: number,
+  intro: number,
+  scatter: number
+) {
+  if (intro <= 0 || scatter >= 0.98) return;
+
+  ctx.save();
+  ctx.globalCompositeOperation = 'screen';
+  ctx.globalAlpha = intro * (1 - scatter);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  const garlandPoints: Array<{ x: number; y: number; z: number; scale: number }> = [];
+  const segmentCount = 220;
+  const visibleSegments = Math.max(2, Math.floor(segmentCount * intro));
+  for (let i = 0; i <= visibleSegments; i++) {
+    const t = (i / segmentCount) * 0.94;
+    const radius = 6.9 * Math.pow(1 - t, 0.85) + 0.45;
+    const angle = t * TAU * 4.8 + time * 0.025;
+    const point = projectFrame(Math.cos(angle) * radius, -8.85 + t * 14.8, Math.sin(angle) * radius);
+    garlandPoints.push(point);
+  }
+
+  ctx.shadowColor = '#ffd56a';
+  ctx.shadowBlur = 12;
+  ctx.strokeStyle = 'rgba(255, 200, 72, 0.88)';
+  ctx.lineWidth = Math.max(1.5, garlandPoints[0].scale * 0.075);
+  ctx.beginPath();
+  let drawingFront = false;
+  garlandPoints.forEach((point) => {
+    if (point.z > 0) {
+      if (!drawingFront) ctx.moveTo(point.x, point.y);
+      else ctx.lineTo(point.x, point.y);
+      drawingFront = true;
+    } else {
+      drawingFront = false;
+    }
+  });
+  ctx.stroke();
+
+  ctx.shadowBlur = 9;
+  for (let i = 0; i < garlandPoints.length; i += 7) {
+    const point = garlandPoints[i];
+    if (point.z <= 0) continue;
+    const radius = Math.max(1.8, point.scale * 0.1);
+    ctx.fillStyle = i % 2 === 0 ? '#fff1aa' : '#f6c94e';
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, radius, 0, TAU);
+    ctx.fill();
+  }
+
+  const ornamentColors = ['#d33139', '#f3c64e', '#e9e1c0'];
+  for (let i = 0; i < 34; i++) {
+    const t = 0.1 + (i / 34) * 0.76;
+    const radius = 6.9 * Math.pow(1 - t, 0.85) + 0.45;
+    const angle = i * 2.399 + time * 0.025;
+    const point = projectFrame(Math.cos(angle) * radius, -8.75 + t * 14.8, Math.sin(angle) * radius);
+    if (point.z <= 0) continue;
+
+    const ornamentRadius = Math.max(2.5, point.scale * 0.25);
+    const color = ornamentColors[i % ornamentColors.length];
+    const shine = ctx.createRadialGradient(
+      point.x - ornamentRadius * 0.35,
+      point.y - ornamentRadius * 0.4,
+      0,
+      point.x,
+      point.y,
+      ornamentRadius
+    );
+    shine.addColorStop(0, '#fff8d8');
+    shine.addColorStop(0.28, color);
+    shine.addColorStop(1, '#54252a');
+    ctx.fillStyle = shine;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 5;
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, ornamentRadius, 0, TAU);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
 export interface CanvasHandle {
   restartIntro: () => void;
   resetCamera: () => void;
@@ -55,7 +395,8 @@ interface Props {
     width: number,
     height: number,
     focal: number,
-    scatter: number
+    scatter: number,
+    intro: number
   ) => void;
 }
 
@@ -119,6 +460,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
 
     const sceneSettings = settingsRef.current;
     const palette = currentThemeRef.current.palette;
+    const treePalette = currentThemeRef.current.treePalette;
 
     // 1. Tree Helix Points
     const pts: TreePoint[] = [];
@@ -152,7 +494,9 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         cy,
         cz,
         t: t,
-        c: Math.floor(Math.random() * palette.length),
+        c: treePalette
+          ? palette.length + Math.min(treePalette.length - 1, Math.floor(t * treePalette.length))
+          : Math.floor(Math.random() * palette.length),
         base: ornament ? rand(0.9, 1.25) : rand(0.15, 0.3),
         phase: rand(TAU),
         fade: t > 0.9 ? 1 - ((t - 0.9) / 0.1) * 0.6 : 1,
@@ -253,7 +597,10 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
 
   // Update scene assets without restarting the animation loop.
   useEffect(() => {
-    spritesRef.current = generateSprites(currentTheme.palette);
+    spritesRef.current = generateSprites([
+      ...currentTheme.palette,
+      ...(currentTheme.treePalette || []),
+    ]);
   }, [currentTheme]);
 
   useEffect(() => {
@@ -263,6 +610,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
     settings.totalPoints,
     settings.strings,
     settings.turns,
+    settings.themeId,
     settings.orbitCount,
     settings.sparkleCount,
     settings.petalCount,
@@ -414,9 +762,9 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         starSequenceRef.current += dt;
       }
 
-      // The canvas renders at display refresh rate; the DOM photo overlay only needs 30 updates/sec.
-      if (currentTimeMs - lastCameraUpdateRef.current >= 1000 / 30) {
-        onCameraUpdateRef.current?.(yaw, pitch, w, h, effFocal, scatter);
+      // Keep the DOM photo overlay in step with the canvas animation.
+      if (currentTimeMs - lastCameraUpdateRef.current >= 1000 / 60) {
+        onCameraUpdateRef.current?.(yaw, pitch, w, h, effFocal, scatter, intro);
         lastCameraUpdateRef.current = currentTimeMs;
       }
 
@@ -588,6 +936,11 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         ctx.restore();
       }
 
+      if (frameTheme.id === 'snowglobe') {
+        drawTreeDecorations(ctx, projectFrame, time, intro, scatter);
+      }
+      drawGiftModels(ctx, projectFrame, sprites, time, intro, scatter, w, h);
+
       // 6. Orbiting Points (fairy dust)
       if (frameSettings.showOrbits) {
         ctx.globalCompositeOperation = 'lighter';
@@ -685,7 +1038,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         ctx.translate(pStar.x, pStar.y);
         ctx.scale(pulse * appearScale, pulse * appearScale);
 
-        const R = effFocal * 0.22;
+        const R = effFocal * (frameTheme.id === 'snowglobe' ? 0.14 : 0.22);
         const gStar = ctx.createRadialGradient(0, 0, 0, 0, 0, R);
         gStar.addColorStop(0, frameTheme.star.inner);
         gStar.addColorStop(0.12, frameTheme.star.mid);
@@ -697,7 +1050,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         ctx.fill();
 
         // 10 Rays
-        const rayLen = effFocal * 0.28;
+        const rayLen = effFocal * (frameTheme.id === 'snowglobe' ? 0.1 : 0.28);
         for (let i = 0; i < 10; i++) {
           ctx.save();
           ctx.rotate((i * Math.PI) / 5 + time * 0.55);
@@ -717,7 +1070,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
 
         // Inner solid 10-point star
         ctx.rotate(-time * 0.3);
-        const sr = focal * 0.042;
+        const sr = focal * (frameTheme.id === 'snowglobe' ? 0.05 : 0.042);
         ctx.beginPath();
         for (let k = 0; k < 10; k++) {
           const r = k % 2 === 0 ? sr : sr * 0.42;
@@ -730,7 +1083,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         ctx.closePath();
         ctx.fillStyle = frameTheme.star.star;
         ctx.shadowColor = frameTheme.star.glow;
-        ctx.shadowBlur = 45;
+        ctx.shadowBlur = frameTheme.id === 'snowglobe' ? 25 : 45;
         ctx.fill();
         ctx.restore();
       }

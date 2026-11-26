@@ -4,7 +4,7 @@ import { ControlsPanel } from './components/ControlsPanel';
 import { FloatingPhotosOverlay } from './components/FloatingPhotosOverlay';
 import { HandTrackingWebcam } from './components/HandTrackingWebcam';
 import { PhotoLightbox } from './components/PhotoLightbox';
-import { TreeSettings, HandGestureState, MemoryPhoto } from './types';
+import { TreeSettings, HandGestureState, MemoryPhoto, PhotoTransitionOrigin } from './types';
 import { DEFAULT_SETTINGS } from './config/themes';
 import { chimeAudio } from './utils/audio';
 
@@ -20,7 +20,10 @@ interface ChristmasSceneProps {
   gestureState: HandGestureState;
   canvasRef: React.MutableRefObject<CanvasHandle | null>;
   isPhotoOpen: boolean;
-  onSelectPhoto: (photo: MemoryPhoto) => void;
+  isPhotoClosing: boolean;
+  selectedPhotoId?: string;
+  onSelectPhoto: (photo: MemoryPhoto, origin?: PhotoTransitionOrigin) => void;
+  onPhotoOriginUpdate: (photoId: string, origin: PhotoTransitionOrigin) => void;
   onRequestClosePhoto: () => void;
 }
 
@@ -29,7 +32,10 @@ const ChristmasScene = React.memo<ChristmasSceneProps>(({
   gestureState,
   canvasRef,
   isPhotoOpen,
+  isPhotoClosing,
+  selectedPhotoId,
   onSelectPhoto,
+  onPhotoOriginUpdate,
   onRequestClosePhoto,
 }) => {
   const [cameraState, setCameraState] = useState({
@@ -39,6 +45,7 @@ const ChristmasScene = React.memo<ChristmasSceneProps>(({
     height: 0,
     focal: 800,
     scatter: 0,
+    intro: 0,
   });
 
   const handleCameraUpdate = useCallback(
@@ -48,9 +55,10 @@ const ChristmasScene = React.memo<ChristmasSceneProps>(({
       width: number,
       height: number,
       focal: number,
-      scatter: number
+      scatter: number,
+      intro: number
     ) => {
-      setCameraState({ yaw, pitch, width, height, focal, scatter });
+      setCameraState({ yaw, pitch, width, height, focal, scatter, intro });
     },
     []
   );
@@ -73,9 +81,14 @@ const ChristmasScene = React.memo<ChristmasSceneProps>(({
           height={cameraState.height}
           focal={cameraState.focal}
           scatter={cameraState.scatter}
+          introProgress={cameraState.intro}
+          treeIsDispersed={settings.treeState === 'dispersed'}
           gestureState={gestureState}
           onSelectPhoto={onSelectPhoto}
+          selectedPhotoId={selectedPhotoId}
+          onPhotoOriginUpdate={onPhotoOriginUpdate}
           isPhotoOpen={isPhotoOpen}
+          isPhotoClosing={isPhotoClosing}
           onRequestClosePhoto={onRequestClosePhoto}
         />
       )}
@@ -88,18 +101,22 @@ export const App: React.FC = () => {
     try {
       const saved = localStorage.getItem(SETTINGS_STORAGE_KEY);
       if (saved) {
+        const savedSettings = JSON.parse(saved);
         return {
           ...DEFAULT_SETTINGS,
-          ...JSON.parse(saved),
+          ...savedSettings,
+          themeId: savedSettings.themeId === 'frozen' ? DEFAULT_SETTINGS.themeId : savedSettings.themeId,
           treeState: 'formed',
         };
       }
       for (const storageKey of PREVIOUS_SETTINGS_STORAGE_KEYS) {
         const previousSettings = localStorage.getItem(storageKey);
         if (previousSettings) {
+          const savedSettings = JSON.parse(previousSettings);
           return {
             ...DEFAULT_SETTINGS,
-            ...JSON.parse(previousSettings),
+            ...savedSettings,
+            themeId: savedSettings.themeId === 'frozen' ? DEFAULT_SETTINGS.themeId : savedSettings.themeId,
             webcamEnabled: true,
             treeState: 'formed',
           };
@@ -108,7 +125,7 @@ export const App: React.FC = () => {
     } catch {
       // fallback
     }
-    // Always default to 'frozen' (Blue style)
+    // Fall back to the default theme when there are no saved settings.
     return DEFAULT_SETTINGS;
   });
 
@@ -130,17 +147,36 @@ export const App: React.FC = () => {
 
   // Selected Memory Photo for Lightbox Modal
   const [selectedPhoto, setSelectedPhoto] = useState<MemoryPhoto | null>(null);
+  const [photoOrigin, setPhotoOrigin] = useState<PhotoTransitionOrigin | undefined>();
+  const [isPhotoClosing, setIsPhotoClosing] = useState(false);
+  const photoOriginRef = useRef<PhotoTransitionOrigin | undefined>();
+  const selectedPhotoIdRef = useRef<string | null>(null);
   const [photoCloseRequest, setPhotoCloseRequest] = useState(0);
   const photoOpenRef = useRef(false);
   const closeRequestedRef = useRef(false);
-  const handleSelectPhoto = useCallback((photo: MemoryPhoto) => {
+  const handleSelectPhoto = useCallback((photo: MemoryPhoto, origin?: PhotoTransitionOrigin) => {
     closeRequestedRef.current = false;
     photoOpenRef.current = true;
+    setIsPhotoClosing(false);
+    selectedPhotoIdRef.current = photo.id;
+    photoOriginRef.current = origin;
+    setPhotoOrigin(origin);
     setSelectedPhoto(photo);
   }, []);
+  const handlePhotoOriginUpdate = useCallback((photoId: string, origin: PhotoTransitionOrigin) => {
+    if (selectedPhotoIdRef.current === photoId) {
+      photoOriginRef.current = origin;
+    }
+  }, []);
+  const handlePhotoCloseStart = useCallback(() => setIsPhotoClosing(true), []);
+  const getCurrentPhotoOrigin = useCallback(() => photoOriginRef.current, []);
   const handleClosePhoto = useCallback(() => {
     photoOpenRef.current = false;
     closeRequestedRef.current = false;
+    setIsPhotoClosing(false);
+    selectedPhotoIdRef.current = null;
+    photoOriginRef.current = undefined;
+    setPhotoOrigin(undefined);
     setSelectedPhoto(null);
   }, []);
   const requestPhotoClose = useCallback(() => {
@@ -227,7 +263,10 @@ export const App: React.FC = () => {
         gestureState={gestureState}
         canvasRef={canvasRef}
         isPhotoOpen={selectedPhoto !== null}
+        isPhotoClosing={isPhotoClosing}
+        selectedPhotoId={selectedPhoto?.id}
         onSelectPhoto={handleSelectPhoto}
+        onPhotoOriginUpdate={handlePhotoOriginUpdate}
         onRequestClosePhoto={requestPhotoClose}
       />
 
@@ -263,7 +302,10 @@ export const App: React.FC = () => {
       {/* Fullscreen Photo Lightbox Modal */}
       <PhotoLightbox
         photo={selectedPhoto}
+        origin={photoOrigin}
+        getCurrentOrigin={getCurrentPhotoOrigin}
         closeRequest={photoCloseRequest}
+        onCloseStart={handlePhotoCloseStart}
         onClose={handleClosePhoto}
       />
     </div>

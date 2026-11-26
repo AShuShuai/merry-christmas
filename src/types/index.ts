@@ -1,12 +1,13 @@
 export type ColorRGB = [number, number, number];
 
-export type ThemeId = 'pink' | 'classic' | 'frozen' | 'golden' | 'cyber';
+export type ThemeId = 'pink' | 'classic' | 'frozen' | 'golden' | 'cyber' | 'snowglobe';
 
 export interface Theme {
   id: ThemeId;
   name: string;
   tagline: string;
   palette: ColorRGB[];
+  treePalette?: ColorRGB[];
   bgGradient: [string, string, string];
   groundGlow: {
     inner: string;
@@ -35,6 +36,13 @@ export interface MemoryPhoto {
   angle: number;
   y: number;
   radius: number;
+}
+
+export interface PhotoTransitionOrigin {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
 }
 
 export interface HandGestureState {

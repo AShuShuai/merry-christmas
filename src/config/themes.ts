@@ -151,10 +151,48 @@ export const THEMES: Record<ThemeId, Theme> = {
     greetingGradient: ['#ffffff', '#f472b6', '#c084fc', '#06b6d4'],
     greetingGlow: 'rgba(192,132,252,0.85)',
   },
+
+  snowglobe: {
+    id: 'snowglobe',
+    name: 'Abete Smeraldo',
+    tagline: 'Luci dorate e decorazioni rosso rubino',
+    palette: [
+      [255, 224, 150],
+      [255, 198, 82],
+      [255, 245, 205],
+      [218, 165, 32],
+      [255, 239, 213],
+      [255, 255, 255],
+    ],
+    treePalette: [
+      [13, 66, 39],
+      [17, 91, 48],
+      [24, 119, 57],
+      [31, 138, 64],
+      [21, 99, 48],
+      [38, 127, 60],
+    ],
+    bgGradient: ['#211c16', '#100f0d', '#050505'],
+    groundGlow: {
+      inner: 'rgba(255,215,120,0.38)',
+      mid: 'rgba(255,190,82,0.16)',
+      outer: 'rgba(180,120,0,0)',
+    },
+    star: {
+      inner: 'rgba(255,248,207,1)',
+      mid: 'rgba(255,219,112,0.9)',
+      outer: 'rgba(255,166,45,0.32)',
+      star: 'rgba(255,213,94,1)',
+      glow: 'rgba(255,174,38,1)',
+    },
+    petalColor: '#ffe8a3',
+    greetingGradient: ['#ffffff', '#ffe8a3', '#ffc84d', '#d28a16'],
+    greetingGlow: 'rgba(255,210,100,0.85)',
+  },
 };
 
 export const DEFAULT_SETTINGS: TreeSettings = {
-  themeId: 'frozen', // Default Blue style per user request!
+  themeId: 'snowglobe',
   totalPoints: 7200,
   strings: 3,
   turns: 27,

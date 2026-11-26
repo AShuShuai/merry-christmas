@@ -530,6 +530,9 @@ export const ControlsPanel = React.memo<Props>(({
                 <label className="block font-semibold text-white/90 mb-1">Seleziona Palette</label>
                 {themesList.map((t) => {
                   const isSelected = settings.themeId === t.id;
+                  const previewPalette = t.treePalette
+                    ? [...t.treePalette, ...t.palette.slice(0, 2)]
+                    : t.palette;
                   return (
                     <div
                       key={t.id}
@@ -555,7 +558,7 @@ export const ControlsPanel = React.memo<Props>(({
                       <p className="text-[11px] text-white/50 mb-2.5">{t.tagline}</p>
                       {/* Color dots preview */}
                       <div className="flex items-center gap-1.5">
-                        {t.palette.map((rgb, idx) => (
+                        {previewPalette.map((rgb, idx) => (
                           <span
                             key={idx}
                             className="w-4 h-4 rounded-full border border-white/20 shadow-sm"
