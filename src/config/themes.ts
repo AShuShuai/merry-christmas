@@ -213,7 +213,6 @@ export const DEFAULT_SETTINGS: TreeSettings = {
   meteorCount: 4,
   sparkleCount: 150,
   musicEnabled: false,
-  webcamEnabled: true,
   showPhotos: true,
   photos: DEFAULT_PHOTOS,
   treeState: 'formed',

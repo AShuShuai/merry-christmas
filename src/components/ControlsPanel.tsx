@@ -1,27 +1,21 @@
 import React, { useState } from 'react';
 import {
   Sparkles,
+  Info,
   Palette,
   Type,
   Sliders,
   RotateCcw,
-  Camera,
   Volume2,
   VolumeX,
-  Maximize,
-  Minimize,
   Eye,
   EyeOff,
   ChevronRight,
   ChevronLeft,
   Heart,
-  Wand2,
   Image,
   Plus,
   Trash2,
-  Video,
-  VideoOff,
-  Hand,
 } from 'lucide-react';
 import { TreeSettings, ThemeId, GreetingFont, MemoryPhoto } from '../types';
 import { THEMES } from '../config/themes';
@@ -32,22 +26,18 @@ interface Props {
   settings: TreeSettings;
   onUpdateSettings: (updater: (prev: TreeSettings) => TreeSettings) => void;
   canvasRef: React.RefObject<CanvasHandle>;
-  isFullscreen: boolean;
-  onToggleFullscreen: () => void;
   onToggleAudio: () => void;
-  onToggleWebcam: () => void;
 }
 
 export const ControlsPanel = React.memo<Props>(({
   settings,
   onUpdateSettings,
   canvasRef,
-  isFullscreen,
-  onToggleFullscreen,
   onToggleAudio,
-  onToggleWebcam,
 }) => {
   const [isOpen, setIsOpen] = useState<boolean>(false);
+  const [isHelpOpen, setIsHelpOpen] = useState(false);
+  const [isHelpHovered, setIsHelpHovered] = useState(false);
   const [activeTab, setActiveTab] = useState<'photos' | 'text' | 'theme' | 'effects'>('photos');
 
   // New photo form state
@@ -114,20 +104,6 @@ export const ControlsPanel = React.memo<Props>(({
     <>
       {/* Floating Action Button Bar (Top Right) */}
       <div className="fixed top-4 right-4 z-50 flex items-center gap-2 pointer-events-auto">
-        {/* Webcam Hand Tracking Toggle Button */}
-        <button
-          type="button"
-          onClick={onToggleWebcam}
-          title={settings.webcamEnabled ? 'Disattiva Webcam Gesti Mano' : 'Attiva Webcam & Gesti della Mano 🖐️'}
-          className={`p-3 rounded-full backdrop-blur-md border transition-all duration-300 shadow-lg ${
-            settings.webcamEnabled
-              ? 'bg-cyan-500/40 border-cyan-400 text-cyan-200 shadow-cyan-500/30 animate-pulse'
-              : 'bg-black/40 border-white/15 text-white/70 hover:text-white hover:bg-black/60 hover:border-white/30'
-          }`}
-        >
-          {settings.webcamEnabled ? <Video size={18} className="text-cyan-300" /> : <VideoOff size={18} />}
-        </button>
-
         {/* Toggle Audio Chimes Button */}
         <button
           type="button"
@@ -140,36 +116,6 @@ export const ControlsPanel = React.memo<Props>(({
           }`}
         >
           {settings.musicEnabled ? <Volume2 size={18} /> : <VolumeX size={18} />}
-        </button>
-
-        {/* Snapshot Button */}
-        <button
-          type="button"
-          onClick={() => canvasRef.current?.takeSnapshot()}
-          title="Scatta Foto HD dell'albero (PNG)"
-          className="p-3 rounded-full bg-black/40 backdrop-blur-md border border-white/15 text-white/70 hover:text-white hover:bg-black/60 hover:border-white/30 transition-all duration-300 shadow-lg"
-        >
-          <Camera size={18} />
-        </button>
-
-        {/* Restart Intro Animation Button */}
-        <button
-          type="button"
-          onClick={() => canvasRef.current?.restartIntro()}
-          title="Riavvia Animazione Magica Iniziale"
-          className="p-3 rounded-full bg-black/40 backdrop-blur-md border border-white/15 text-white/70 hover:text-white hover:bg-black/60 hover:border-white/30 transition-all duration-300 shadow-lg group"
-        >
-          <Wand2 size={18} className="group-hover:rotate-12 transition-transform" />
-        </button>
-
-        {/* Fullscreen Button */}
-        <button
-          type="button"
-          onClick={onToggleFullscreen}
-          title={isFullscreen ? 'Esci da Schermo Intero' : 'Schermo Intero'}
-          className="p-3 rounded-full bg-black/40 backdrop-blur-md border border-white/15 text-white/70 hover:text-white hover:bg-black/60 hover:border-white/30 transition-all duration-300 shadow-lg"
-        >
-          {isFullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
         </button>
 
         {/* Open/Close Settings Panel Button */}
@@ -189,14 +135,35 @@ export const ControlsPanel = React.memo<Props>(({
         </button>
       </div>
 
-      {/* Interactive Helper Hint (Bottom Left) */}
-      <div className="fixed bottom-4 left-4 z-40 pointer-events-none text-[11px] font-sans text-white/50 bg-black/40 backdrop-blur-md px-3.5 py-2 rounded-full border border-cyan-400/20 hidden sm:flex items-center gap-2">
-        <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
-        <span>
-          {settings.webcamEnabled
-            ? '🖐️ Muovi la mano per ruotare • 👌 Pizzica per aprire la foto'
-            : 'Trascina per ruotare in 3D • Tocca le foto per aprirle'}
-        </span>
+      <div
+        className="fixed bottom-4 left-4 z-40 pointer-events-auto"
+        onPointerEnter={(event) => {
+          if (event.pointerType === 'mouse') setIsHelpHovered(true);
+        }}
+        onPointerLeave={() => setIsHelpHovered(false)}
+      >
+        {(isHelpOpen || isHelpHovered) && (
+          <div
+            id="gesture-help"
+            role="tooltip"
+            className="absolute bottom-full left-0 mb-3 w-64 rounded-2xl border border-white/15 bg-[#07101c]/85 p-4 text-left text-xs text-white/80 shadow-2xl backdrop-blur-xl"
+          >
+            <h2 className="mb-2 font-semibold text-cyan-200">Gesti della mano</h2>
+            <p className="mb-1.5">Muovi la mano per ruotare l'albero.</p>
+            <p className="mb-1.5">Palmo aperto: disperdi l'albero; pugno: ricomponilo.</p>
+            <p>Pizzica con indice e pollice per aprire una foto.</p>
+          </div>
+        )}
+        <button
+          type="button"
+          aria-label="Istruzioni per i gesti"
+          aria-expanded={isHelpOpen || isHelpHovered}
+          aria-controls="gesture-help"
+          onClick={() => setIsHelpOpen((open) => !open)}
+          className="flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-black/45 text-white/75 shadow-lg backdrop-blur-md transition-colors hover:border-cyan-300/50 hover:bg-black/65 hover:text-cyan-100"
+        >
+          <Info size={17} />
+        </button>
       </div>
 
       {/* Settings Modal Drawer (Slide-in from Right) */}
@@ -282,21 +249,6 @@ export const ControlsPanel = React.memo<Props>(({
             {/* TAB: FOTO & RICORDI FLUTTUANTI */}
             {activeTab === 'photos' && (
               <div className="space-y-5">
-                {/* Hand Gesture Instruction Banner */}
-                <div className="p-3.5 rounded-2xl bg-cyan-500/10 border border-cyan-400/30 flex items-start gap-3">
-                  <div className="p-2 rounded-xl bg-cyan-400/20 text-cyan-300 shrink-0">
-                    <Hand size={18} />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-cyan-200 text-xs mb-1">Controllo con la Mano AI</h3>
-                    <p className="text-[11px] text-cyan-100/70 leading-relaxed">
-                      Attiva la webcam in alto: muovi la mano per <strong>ruotare l'albero</strong>. Apri il palmo (🖐️)
-                      per <strong>disperdere l'albero in galassia</strong>, chiudi a pugno (✊) per ricompattarlo, e{' '}
-                      <strong>pizzica con indice e pollice (👌)</strong> per aprire le foto!
-                    </p>
-                  </div>
-                </div>
-
                 {/* Quick Tree State Toggle (Formed vs Dispersed) */}
                 <div className="grid grid-cols-2 gap-2">
                   <button

@@ -3,25 +3,14 @@ import { handTracker } from '../utils/handTracker';
 import type { HandGestureState } from '../types';
 
 interface Props {
-  enabled: boolean;
-  visible: boolean;
   onGesture: (state: HandGestureState) => void;
 }
 
-export const HandTrackingWebcam = React.memo<Props>(({
-  enabled,
-  visible,
-  onGesture,
-}) => {
+export const HandTrackingWebcam = React.memo<Props>(({ onGesture }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
-    if (!enabled) {
-      handTracker.stop();
-      return;
-    }
-
     let isMounted = true;
     const start = async () => {
       if (videoRef.current && canvasRef.current) {
@@ -37,15 +26,11 @@ export const HandTrackingWebcam = React.memo<Props>(({
       isMounted = false;
       handTracker.stop();
     };
-  }, [enabled, onGesture]);
-
-  if (!enabled) return null;
+  }, [onGesture]);
 
   return (
     <div
-      className={`fixed right-4 top-20 z-40 h-28 w-36 overflow-hidden rounded-xl border border-white/15 bg-black/60 shadow-lg pointer-events-none ${
-        visible ? '' : 'hidden'
-      }`}
+      className="fixed bottom-4 right-4 z-40 h-28 w-36 overflow-hidden rounded-xl border border-white/15 bg-black/60 shadow-lg pointer-events-none max-sm:bottom-auto max-sm:left-4 max-sm:right-auto max-sm:top-4"
     >
       <video
         ref={videoRef}
@@ -63,8 +48,4 @@ export const HandTrackingWebcam = React.memo<Props>(({
       />
     </div>
   );
-}, (previous, next) =>
-  previous.enabled === next.enabled &&
-  previous.visible === next.visible &&
-  previous.onGesture === next.onGesture
-);
+}, (previous, next) => previous.onGesture === next.onGesture);

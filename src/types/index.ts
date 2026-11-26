@@ -78,8 +78,7 @@ export interface TreeSettings {
   meteorCount: number;
   sparkleCount: number;
   musicEnabled: boolean;
-  // New Hand Tracking & Photos & Chaos Mode
-  webcamEnabled: boolean;
+  // Hand Tracking, Photos & Chaos Mode
   showPhotos: boolean;
   photos: MemoryPhoto[];
   treeState: 'formed' | 'dispersed';

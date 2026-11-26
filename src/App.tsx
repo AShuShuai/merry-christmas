@@ -68,8 +68,8 @@ const ChristmasScene = React.memo<ChristmasSceneProps>(({
       <ChristmasTreeCanvas
         ref={canvasRef}
         settings={settings}
-        gestureDeltaX={settings.webcamEnabled && gestureState.hasHand ? gestureState.deltaX : 0}
-        gestureDeltaY={settings.webcamEnabled && gestureState.hasHand ? gestureState.deltaY : 0}
+        gestureDeltaX={gestureState.hasHand ? gestureState.deltaX : 0}
+        gestureDeltaY={gestureState.hasHand ? gestureState.deltaY : 0}
         onCameraUpdate={handleCameraUpdate}
       />
       {settings.showPhotos && (
@@ -102,6 +102,7 @@ export const App: React.FC = () => {
       const saved = localStorage.getItem(SETTINGS_STORAGE_KEY);
       if (saved) {
         const savedSettings = JSON.parse(saved);
+        delete savedSettings.webcamEnabled;
         return {
           ...DEFAULT_SETTINGS,
           ...savedSettings,
@@ -113,11 +114,11 @@ export const App: React.FC = () => {
         const previousSettings = localStorage.getItem(storageKey);
         if (previousSettings) {
           const savedSettings = JSON.parse(previousSettings);
+          delete savedSettings.webcamEnabled;
           return {
             ...DEFAULT_SETTINGS,
             ...savedSettings,
             themeId: savedSettings.themeId === 'frozen' ? DEFAULT_SETTINGS.themeId : savedSettings.themeId,
-            webcamEnabled: true,
             treeState: 'formed',
           };
         }
@@ -129,8 +130,6 @@ export const App: React.FC = () => {
     return DEFAULT_SETTINGS;
   });
 
-  const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
-  const [isUiHidden, setIsUiHidden] = useState<boolean>(false);
   const canvasRef = useRef<CanvasHandle | null>(null);
 
   // Hand Tracking Gesture State
@@ -201,44 +200,6 @@ export const App: React.FC = () => {
     chimeAudio.setLoop(nextState);
   }, [settings.musicEnabled]);
 
-  // Webcam Toggle
-  const handleToggleWebcam = useCallback(() => {
-    setSettings((prev) => ({ ...prev, webcamEnabled: !prev.webcamEnabled }));
-  }, []);
-
-  // Fullscreen Toggle
-  const handleToggleFullscreen = useCallback(() => {
-    if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen().catch(() => {});
-      setIsFullscreen(true);
-    } else {
-      document.exitFullscreen().catch(() => {});
-      setIsFullscreen(false);
-    }
-  }, []);
-
-  // Hotkey 'H' to hide/show UI for clean recording / full immersion
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
-        return;
-      }
-      if (e.key === 'h' || e.key === 'H') {
-        setIsUiHidden((prev) => !prev);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
-
-  useEffect(() => {
-    const onFsChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
-    };
-    document.addEventListener('fullscreenchange', onFsChange);
-    return () => document.removeEventListener('fullscreenchange', onFsChange);
-  }, []);
-
   // Gesture callback from MediaPipe hand tracker
   const handleGestureUpdate = useCallback((st: HandGestureState) => {
     setGestureState(st);
@@ -270,32 +231,17 @@ export const App: React.FC = () => {
         onRequestClosePhoto={requestPhotoClose}
       />
 
-      {/* Keep the tracker mounted while the UI is hidden to avoid restarting the camera. */}
       <HandTrackingWebcam
-        enabled={settings.webcamEnabled}
-        visible={!isUiHidden}
         onGesture={handleGestureUpdate}
       />
 
       {/* Floating Controls Overlay */}
-      {!isUiHidden && (
-        <ControlsPanel
-          settings={settings}
-          onUpdateSettings={setSettings}
-          canvasRef={canvasRef}
-          isFullscreen={isFullscreen}
-          onToggleFullscreen={handleToggleFullscreen}
-          onToggleAudio={handleToggleAudio}
-          onToggleWebcam={handleToggleWebcam}
-        />
-      )}
-
-      {/* Keyboard Helper Hint */}
-      {!isUiHidden && (
-        <div className="fixed top-4 left-4 z-30 pointer-events-none text-[11px] font-mono text-cyan-200/50 bg-black/35 backdrop-blur-sm px-3 py-1.5 rounded-full border border-cyan-400/15 hidden md:block">
-          Premi <kbd className="px-1.5 py-0.5 rounded bg-white/10 text-cyan-200 font-bold">H</kbd> per nascondere i tasti
-        </div>
-      )}
+      <ControlsPanel
+        settings={settings}
+        onUpdateSettings={setSettings}
+        canvasRef={canvasRef}
+        onToggleAudio={handleToggleAudio}
+      />
 
       {/* Fullscreen Photo Lightbox Modal */}
       <PhotoLightbox
