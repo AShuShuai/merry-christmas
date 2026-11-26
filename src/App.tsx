@@ -274,9 +274,7 @@ export const App: React.FC = () => {
       <HandTrackingWebcam
         enabled={settings.webcamEnabled}
         visible={!isUiHidden}
-        onToggle={handleToggleWebcam}
         onGesture={handleGestureUpdate}
-        gestureState={gestureState}
       />
 
       {/* Floating Controls Overlay */}
