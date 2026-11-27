@@ -127,9 +127,10 @@ function assignPortraitTargets(
     pt.portraitSpeed = tgt.speed;
     pt.portraitPriority = tgt.priority;
     pt.portraitCategory = tgt.category;
+    pt.portraitIsSparkle = tgt.isSparkle;
   }
 
-  // If portrait targets has more points (e.g. 8,500 points total),
+  // If portrait targets has more points (e.g. 9,800 points total),
   // dynamically allocate temporary star particles that fade in during expansion!
   if (tempStarPointsRef) {
     const extraPoints: TreePoint[] = [];
@@ -157,6 +158,7 @@ function assignPortraitTargets(
         portraitSpeed: tgt.speed,
         portraitPriority: tgt.priority,
         portraitCategory: tgt.category,
+        portraitIsSparkle: tgt.isSparkle,
         isTemporary: true,
       });
     }
@@ -886,10 +888,12 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         ? createProjector(yaw * (1 - portraitProgress), pitch * (1 - portraitProgress), w, h, effFocal)
         : projectFrame;
       const portraitAspect = portraitTargetsRef.current?.aspect ?? portraitAspectRef.current;
-      const portraitWidth = Math.min(w * 0.7, h * 0.72 * portraitAspect);
-      const portraitHeight = portraitWidth / portraitAspect;
+      const targetMaxH = h * 0.74;
+      const targetMaxW = w * 0.74;
+      const portraitHeight = Math.min(targetMaxH, targetMaxW / portraitAspect);
+      const portraitWidth = portraitHeight * portraitAspect;
       const portraitLeft = (w - portraitWidth) / 2;
-      const portraitTop = (h - portraitHeight) / 2;
+      const portraitTop = Math.max(h * 0.06, (h * 0.85 - portraitHeight) / 2);
       if (frameSettings.treeState !== 'formed' || !frameSettings.showStar) {
         starSequenceRef.current = 0;
       } else if (scatter < 0.06 && intro >= 0.9) {
@@ -935,7 +939,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         const size = f.r * 2;
         const flick = 0.7 + 0.3 * Math.sin(time * 1.2 + f.drift);
         const flare = Math.pow(Math.max(0, Math.sin(time * 0.7 + f.drift * 3)), 12);
-        ctx.globalAlpha = Math.min(1, f.alpha * (flick + flare)) * portraitClarity;
+        ctx.globalAlpha = Math.min(1, f.alpha * (flick + flare)) * (0.35 + 0.65 * portraitClarity);
         ctx.drawImage(sprites[0], f.x - size / 2, f.y - size / 2, size, size);
       }
 
@@ -1119,7 +1123,29 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
           const stardustAlpha = whiteGlow * portraitVisibility * priorityCullMult * tempFadeMult;
           if (stardustAlpha > 0.005) {
             ctx.globalAlpha = stardustAlpha;
-            ctx.drawImage(starlightSprite, cx - size / 2, cy - size / 2, size, size);
+
+            // Solid crisp white core: guarantees 100% pure brilliant #FFFFFF opacity on black background (Image 1)
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(cx, cy, Math.max(0.65, size * 0.45), 0, TAU);
+            ctx.fill();
+
+            // Atmospheric starlight glow halo
+            const glowSize = Math.max(3.2, size * 2.5);
+            ctx.drawImage(starlightSprite, cx - glowSize / 2, cy - glowSize / 2, glowSize, glowSize);
+
+            // 4-Pointed Diamond Star Twinkle Cross for sparkle stars (Image 1)
+            if (pt.portraitIsSparkle || pFlare > 0.55) {
+              const flareLen = Math.max(3.5, size * (2.2 + 2.0 * pFlare));
+              ctx.strokeStyle = `rgba(255, 255, 255, ${Math.min(1, 0.75 + 0.25 * pFlare) * stardustAlpha})`;
+              ctx.lineWidth = 0.85;
+              ctx.beginPath();
+              ctx.moveTo(cx - flareLen, cy);
+              ctx.lineTo(cx + flareLen, cy);
+              ctx.moveTo(cx, cy - flareLen);
+              ctx.lineTo(cx, cy + flareLen);
+              ctx.stroke();
+            }
           }
         }
       };
@@ -1347,14 +1373,14 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         burstsRef.current = activeBursts;
       }
 
-      // 10. Greeting Text
+      // 10. Greeting Text (Matching Image 1: glowing golden cursive Merry Christmas)
       if (frameSettings.showGreeting && frameSettings.greetingText.trim().length > 0) {
         ctx.globalCompositeOperation = 'source-over';
-        ctx.globalAlpha = portraitClarity;
+        ctx.globalAlpha = Math.min(1, Math.max(intro, 0.95));
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        const size = Math.max(34, Math.min(88, w * 0.075));
+        const size = Math.max(34, Math.min(84, w * 0.068));
         let fontStr = `italic bold ${size}px "Brush Script MT", "Great Vibes", "Segoe Script", cursive`;
         if (frameSettings.greetingFont === 'serif') {
           fontStr = `italic 800 ${size}px "Playfair Display", Georgia, serif`;
@@ -1363,19 +1389,17 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         }
 
         ctx.font = fontStr;
-        const textY = h * 0.9;
-        const shift = 0.5 + 0.5 * Math.sin(time * 0.9);
+        const textY = Math.min(h * 0.91, portraitTop + portraitHeight + 36);
 
         const textGrad = ctx.createLinearGradient(0, textY - size / 2, 0, textY + size / 2);
-        const [g0, g1, g2, g3] = frameTheme.greetingGradient;
-        textGrad.addColorStop(0, g0);
-        textGrad.addColorStop(0.35 + shift * 0.2, g1);
-        textGrad.addColorStop(0.7, g2);
-        textGrad.addColorStop(1, g3);
+        textGrad.addColorStop(0, '#ffffff');
+        textGrad.addColorStop(0.3, '#fef08a');
+        textGrad.addColorStop(0.65, '#f59e0b');
+        textGrad.addColorStop(1, '#d97706');
 
         ctx.fillStyle = textGrad;
-        ctx.shadowColor = frameTheme.greetingGlow;
-        ctx.shadowBlur = 28 + 12 * Math.sin(time * 2);
+        ctx.shadowColor = 'rgba(251, 191, 36, 0.95)';
+        ctx.shadowBlur = 28 + 10 * Math.sin(time * 2);
         ctx.fillText(frameSettings.greetingText, w / 2, textY);
         ctx.shadowBlur = 0;
       }

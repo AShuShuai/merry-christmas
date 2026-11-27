@@ -112,6 +112,7 @@ export interface TreePoint {
   portraitSpeed?: number;
   portraitPriority?: number;
   portraitCategory?: 'feature' | 'skin' | 'hair' | 'scatter';
+  portraitIsSparkle?: boolean;
   isTemporary?: boolean;
 }
 
