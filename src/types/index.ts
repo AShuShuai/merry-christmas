@@ -110,6 +110,8 @@ export interface TreePoint {
   portraitJitterX?: number;
   portraitJitterY?: number;
   portraitSpeed?: number;
+  portraitPriority?: number;
+  portraitCategory?: 'feature' | 'skin' | 'hair' | 'scatter';
   isTemporary?: boolean;
 }
 

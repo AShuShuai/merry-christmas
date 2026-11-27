@@ -125,9 +125,11 @@ function assignPortraitTargets(
     pt.portraitJitterX = tgt.jitterX;
     pt.portraitJitterY = tgt.jitterY;
     pt.portraitSpeed = tgt.speed;
+    pt.portraitPriority = tgt.priority;
+    pt.portraitCategory = tgt.category;
   }
 
-  // If portrait targets has more points (e.g. 8,000 points total),
+  // If portrait targets has more points (e.g. 8,500 points total),
   // dynamically allocate temporary star particles that fade in during expansion!
   if (tempStarPointsRef) {
     const extraPoints: TreePoint[] = [];
@@ -153,6 +155,8 @@ function assignPortraitTargets(
         portraitJitterX: tgt.jitterX,
         portraitJitterY: tgt.jitterY,
         portraitSpeed: tgt.speed,
+        portraitPriority: tgt.priority,
+        portraitCategory: tgt.category,
         isTemporary: true,
       });
     }
@@ -990,7 +994,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         ctx.restore();
       }
 
-      // 5. Tree Points & Volumetric Stardust Cloud (up to 8,000 particles)
+      // 5. Tree Points & Volumetric Stardust Cloud (up to 8,500 particles with on-the-fly return culling)
       ctx.globalCompositeOperation = 'lighter';
       const pts = treePointsRef.current;
       const tempPts = tempStarPointsRef.current;
@@ -998,7 +1002,43 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
       const heartbeat = frameSettings.breatheEffect ? 0.9 + 0.1 * Math.pow(Math.max(0, Math.sin(time * 1.8)), 6) : 1;
       const starlightSprite = starlightSpriteRef.current || sprites[0];
 
+      const isClosing = frameSettings.treeState === 'formed' || targetScatter === 0;
+
+      // On-the-fly return culling multipliers:
+      // - Priority 4 (outer scatter / shoulders): dissolved by scatter = 0.45
+      // - Priority 3 (hair texture): dissolved by scatter = 0.25
+      // - Temporary star particles: dissolve naturally in mid-air by scatter = 0.28
+      const p4ReturnFactor = isClosing ? Math.max(0, (portraitProgress - 0.45) / 0.55) : 1.0;
+      const p3ReturnFactor = isClosing ? Math.max(0, (portraitProgress - 0.25) / 0.75) : 1.0;
+      const tempReturnFactor = isClosing ? Math.max(0, (portraitProgress - 0.28) / 0.72) : 1.0;
+
+      // Faster, lighter return curve as particles snap back to the helix
+      const returnEase = isClosing
+        ? Math.pow(portraitProgress, 1.45)
+        : portraitProgress;
+
+      // Color fade factors: smooth shift from pure white (#FFFFFF) back to warm tree colors
+      const whiteGlow = Math.pow(portraitProgress, 1.3);
+      const treeColorGlow = Math.max(0, 1 - whiteGlow);
+
       const renderParticle = (pt: TreePoint, isTemp: boolean) => {
+        // CULLING CHECK 1: If temporary star particle has dissolved in mid-air, skip completely!
+        if (isTemp && isClosing && tempReturnFactor <= 0.005) {
+          return;
+        }
+
+        const priority = pt.portraitPriority || 2;
+
+        // CULLING CHECK 2: Progressive Fade & Kill 30% to 50% of less critical particles during return
+        let priorityCullMult = 1.0;
+        if (isClosing) {
+          if (priority === 4) {
+            priorityCullMult = p4ReturnFactor;
+          } else if (priority === 3) {
+            priorityCullMult = p3ReturnFactor;
+          }
+        }
+
         const p = particleProjectFrame(pt.x * breathe, pt.y, pt.z * breathe);
         const px = w / 2 + (p.x - w / 2) * intro;
         const py = h / 2 + (p.y - h / 2) * intro;
@@ -1021,8 +1061,9 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
           const targetX = portraitLeft + pt.portraitX * portraitWidth + (volOffsetX + wave + floatX + jitX);
           const targetY = portraitTop + pt.portraitY * portraitHeight + (volOffsetY + wave * 0.65 + floatY + jitY);
 
-          cx += (targetX - cx) * portraitProgress;
-          cy += (targetY - cy) * portraitProgress;
+          // Accelerated snap-back trail when returning
+          cx += (targetX - cx) * returnEase;
+          cy += (targetY - cy) * returnEase;
         }
 
         const gathering = 1 - intro;
@@ -1041,34 +1082,41 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         const glow = (0.4 + 0.35 * twinkle + 0.45 * waveTwinkle * waveTwinkle + 0.6 * spark) * heartbeat;
         const treeSize = pt.base * p.scale * (0.8 + 0.4 * twinkle + 0.3 * waveTwinkle + 0.5 * spark);
 
-        // Portrait particle size: randomized 0.5px to 2.0px with highlight scaling
-        const portraitSize = pt.portraitSize || (0.65 + pt.portraitLight * 0.95);
+        // Portrait particle size: 0.5px to 2.1px with rich highlights
+        const portraitSize = pt.portraitSize || (0.7 + pt.portraitLight * 1.1);
         let size = treeSize * (1 - portraitProgress) + portraitSize * portraitProgress;
         if (size < 0.5) size = 0.5;
 
         // Asynchronous glowing & twinkling
         const pSpeed = pt.portraitSpeed || 2.4;
-        const pTwinkle = 0.55 + 0.45 * Math.sin(time * pSpeed + pt.phase * 3.7);
+        const pTwinkle = 0.6 + 0.4 * Math.sin(time * pSpeed + pt.phase * 3.7);
         const pFlare = Math.pow(Math.max(0, Math.sin(time * 1.6 + pt.phase * 4.9)), 14) * 0.7;
-        const portraitVisibility = Math.min(1, (0.35 + 0.65 * pt.portraitLight) * (pTwinkle + pFlare));
+
+        // Brilliant, thick starlight visibility for Chiara's face (no dimming by cone depth)
+        let portraitAlphaBase = 0.88 + 0.12 * pt.portraitLight;
+        if (priority === 1) {
+          portraitAlphaBase = 1.0; // Critical eyes, nose, lips
+        } else if (priority === 4) {
+          portraitAlphaBase = 0.75;
+        }
+        const portraitVisibility = Math.min(1.0, portraitAlphaBase * (0.82 + 0.18 * pTwinkle + pFlare));
 
         const baseAlpha = Math.min(1, glow * (0.4 + 0.6 * depth) * pt.fade * (0.4 + 0.6 * intro));
 
-        // When formed in tree: original theme colors (greens, reds, golds)
-        // Transition: smooth-lerp the entire dense shape to glowing white (#FFFFFF) upon opening,
-        // and fade back into the rotating warm Christmas colors on close!
+        // 1. Warm tree colors (greens, golds, scarlets): smoothly fades back in as it nears tree
         if (!isTemp) {
           const originalSprite = sprites[pt.c] || sprites[0];
-          const treeAlpha = baseAlpha * (1 - portraitProgress);
+          const treeAlpha = baseAlpha * treeColorGlow;
           if (treeAlpha > 0.005) {
             ctx.globalAlpha = treeAlpha;
             ctx.drawImage(originalSprite, cx - size / 2, cy - size / 2, size, size);
           }
         }
 
-        // Glowing pure white stardust stippling in portrait mode
-        if (portraitProgress > 0) {
-          const stardustAlpha = (isTemp ? 1 : baseAlpha) * portraitProgress * portraitVisibility;
+        // 2. Pure brilliant white stardust (#FFFFFF): fades out progressively during return
+        if (whiteGlow > 0.005) {
+          const tempFadeMult = isTemp ? tempReturnFactor : 1.0;
+          const stardustAlpha = whiteGlow * portraitVisibility * priorityCullMult * tempFadeMult;
           if (stardustAlpha > 0.005) {
             ctx.globalAlpha = stardustAlpha;
             ctx.drawImage(starlightSprite, cx - size / 2, cy - size / 2, size, size);
@@ -1080,8 +1128,8 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         renderParticle(pts[i], false);
       }
 
-      // Dynamically inject temporary star particles during expansion (up to 8,000 total active particles)
-      if (portraitProgress > 0 && tempPts.length > 0) {
+      // Temporary star particles (dissolve rapidly in mid-air on return, skipped if evaporated)
+      if (portraitProgress > 0 && tempPts.length > 0 && (!isClosing || tempReturnFactor > 0.005)) {
         for (let i = 0; i < tempPts.length; i++) {
           renderParticle(tempPts[i], true);
         }
