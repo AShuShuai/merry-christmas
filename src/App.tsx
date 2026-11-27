@@ -4,7 +4,13 @@ import { ControlsPanel } from './components/ControlsPanel';
 import { FloatingPhotosOverlay } from './components/FloatingPhotosOverlay';
 import { HandTrackingWebcam } from './components/HandTrackingWebcam';
 import { PhotoLightbox } from './components/PhotoLightbox';
-import { TreeSettings, HandGestureState, MemoryPhoto, PhotoTransitionOrigin } from './types';
+import {
+  TreeSettings,
+  HandGestureState,
+  MemoryPhoto,
+  PhotoTransitionOrigin,
+  PortraitLoadStatus,
+} from './types';
 import { DEFAULT_SETTINGS } from './config/themes';
 import { chimeAudio } from './utils/audio';
 
@@ -18,6 +24,8 @@ const PREVIOUS_SETTINGS_STORAGE_KEYS = [
 interface ChristmasSceneProps {
   settings: TreeSettings;
   gestureState: HandGestureState;
+  portraitReady: boolean;
+  onPortraitStatusUpdate: (status: PortraitLoadStatus, message?: string) => void;
   canvasRef: React.MutableRefObject<CanvasHandle | null>;
   isPhotoOpen: boolean;
   isPhotoClosing: boolean;
@@ -30,6 +38,8 @@ interface ChristmasSceneProps {
 const ChristmasScene = React.memo<ChristmasSceneProps>(({
   settings,
   gestureState,
+  portraitReady,
+  onPortraitStatusUpdate,
   canvasRef,
   isPhotoOpen,
   isPhotoClosing,
@@ -70,6 +80,7 @@ const ChristmasScene = React.memo<ChristmasSceneProps>(({
         settings={settings}
         gestureDeltaX={gestureState.hasHand ? gestureState.deltaX : 0}
         gestureDeltaY={gestureState.hasHand ? gestureState.deltaY : 0}
+        onPortraitStatusUpdate={onPortraitStatusUpdate}
         onCameraUpdate={handleCameraUpdate}
       />
       {settings.showPhotos && (
@@ -83,6 +94,7 @@ const ChristmasScene = React.memo<ChristmasSceneProps>(({
           scatter={cameraState.scatter}
           introProgress={cameraState.intro}
           treeIsDispersed={settings.treeState === 'dispersed'}
+          portraitReady={portraitReady}
           gestureState={gestureState}
           onSelectPhoto={onSelectPhoto}
           selectedPhotoId={selectedPhotoId}
@@ -131,6 +143,14 @@ export const App: React.FC = () => {
   });
 
   const canvasRef = useRef<CanvasHandle | null>(null);
+  const [portraitStatus, setPortraitStatus] = useState<{
+    status: PortraitLoadStatus;
+    message?: string;
+  }>({ status: 'loading' });
+  const handlePortraitStatusUpdate = useCallback(
+    (status: PortraitLoadStatus, message?: string) => setPortraitStatus({ status, message }),
+    []
+  );
 
   // Hand Tracking Gesture State
   const [gestureState, setGestureState] = useState<HandGestureState>({
@@ -204,7 +224,7 @@ export const App: React.FC = () => {
   const handleGestureUpdate = useCallback((st: HandGestureState) => {
     setGestureState(st);
 
-    // Keep the tree formed when no hand is visible; an open palm disperses it.
+    // Keep the tree formed when no hand is visible; an open palm reveals the portrait.
     if (!st.hasHand || st.gesture === 'fist') {
       setSettings((prev) => (prev.treeState !== 'formed' ? { ...prev, treeState: 'formed' } : prev));
     } else if (st.gesture === 'open_palm') {
@@ -222,6 +242,8 @@ export const App: React.FC = () => {
       <ChristmasScene
         settings={settings}
         gestureState={gestureState}
+        portraitReady={portraitStatus.status === 'ready'}
+        onPortraitStatusUpdate={handlePortraitStatusUpdate}
         canvasRef={canvasRef}
         isPhotoOpen={selectedPhoto !== null}
         isPhotoClosing={isPhotoClosing}
@@ -239,6 +261,7 @@ export const App: React.FC = () => {
       <ControlsPanel
         settings={settings}
         onUpdateSettings={setSettings}
+        portraitStatus={portraitStatus}
         canvasRef={canvasRef}
         onToggleAudio={handleToggleAudio}
       />

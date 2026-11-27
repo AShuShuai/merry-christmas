@@ -1,8 +1,20 @@
 import React, { useEffect, useRef, useCallback, useImperativeHandle, forwardRef } from 'react';
-import { TreeSettings, TreePoint, OrbitPoint, Sparkle, Petal, Meteor, BurstParticle } from '../types';
+import {
+  ColorRGB,
+  PortraitLoadStatus,
+  TreeSettings,
+  TreePoint,
+  OrbitPoint,
+  Sparkle,
+  Petal,
+  Meteor,
+  BurstParticle,
+} from '../types';
 import { THEMES } from '../config/themes';
 import { generateSprites } from '../engine/sprites';
 import { createProjector } from '../engine/projection';
+import { processPortraitImage } from '../engine/portraitProcessor';
+import type { PortraitPoint, PortraitTargets } from '../engine/portraitProcessor';
 import { chimeAudio } from '../utils/audio';
 
 const TAU = Math.PI * 2;
@@ -91,6 +103,47 @@ function createGiftModels(): GiftModel[] {
 const GIFT_MODELS = createGiftModels();
 
 type Projector = (x: number, y: number, z: number) => { x: number; y: number; z: number; scale: number };
+
+function createWeightedPicker(samples: PortraitPoint[]) {
+  const cumulativeWeights: number[] = [];
+  let totalWeight = 0;
+  for (const sample of samples) {
+    totalWeight += sample.weight;
+    cumulativeWeights.push(totalWeight);
+  }
+
+  return () => {
+    const selection = Math.random() * totalWeight;
+    let low = 0;
+    let high = cumulativeWeights.length - 1;
+    while (low < high) {
+      const middle = Math.floor((low + high) / 2);
+      if (selection <= cumulativeWeights[middle]) high = middle;
+      else low = middle + 1;
+    }
+    return samples[low];
+  };
+}
+
+function assignPortraitTargets(points: TreePoint[], targets: PortraitTargets) {
+  if (points.length === 0) return;
+
+  const pickFace = createWeightedPicker(targets.facialFeatures);
+  const pickOutline = createWeightedPicker(targets.personOutline);
+  const faceCount = Math.round(points.length * 0.65);
+  const useFace = Array.from({ length: points.length }, (_, index) => index < faceCount);
+  for (let index = useFace.length - 1; index > 0; index--) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [useFace[index], useFace[swapIndex]] = [useFace[swapIndex], useFace[index]];
+  }
+
+  points.forEach((point, index) => {
+    const sample = useFace[index] ? pickFace() : pickOutline();
+    point.portraitX = sample.x;
+    point.portraitY = sample.y;
+    point.portraitLight = sample.light;
+  });
+}
 
 function drawGiftModels(
   ctx: CanvasRenderingContext2D,
@@ -222,7 +275,7 @@ function drawGiftModels(
 
   ctx.save();
   ctx.globalCompositeOperation = 'source-over';
-  ctx.globalAlpha = intro;
+  ctx.globalAlpha = intro * (1 - scatterProgress);
   gifts.forEach(({ gift, projectVertex, faces, screenScale, halfWidth, halfHeight, halfDepth }) => {
     const base = projectVertex(0, -halfHeight, 0);
     ctx.save();
@@ -389,6 +442,7 @@ interface Props {
   settings: TreeSettings;
   gestureDeltaX?: number;
   gestureDeltaY?: number;
+  onPortraitStatusUpdate?: (status: PortraitLoadStatus, message?: string) => void;
   onCameraUpdate?: (
     yaw: number,
     pitch: number,
@@ -401,7 +455,13 @@ interface Props {
 }
 
 export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
-  ({ settings, gestureDeltaX = 0, gestureDeltaY = 0, onCameraUpdate }, ref) => {
+  ({
+    settings,
+    gestureDeltaX = 0,
+    gestureDeltaY = 0,
+    onPortraitStatusUpdate,
+    onCameraUpdate,
+  }, ref) => {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
     // Chaos vs Formed scatter factor (0 = formed tree, 1 = dispersed galaxy)
@@ -416,6 +476,9 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
 
   // Scene points refs
   const treePointsRef = useRef<TreePoint[]>([]);
+  const portraitTargetsRef = useRef<PortraitTargets | null>(null);
+  const portraitAspectRef = useRef(1);
+  const portraitRequestRef = useRef(0);
   const orbitPointsRef = useRef<OrbitPoint[]>([]);
   const sparklesRef = useRef<Sparkle[]>([]);
   const petalsRef = useRef<Petal[]>([]);
@@ -476,34 +539,32 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
       const j = 0.14;
       const ep = energyCloudPos(w, h);
       const ornament = Math.random() < 0.035;
-
-      // Generate dispersed cloud target coordinates for Chaos mode
-      const phi = Math.random() * TAU;
-      const costheta = Math.random() * 2 - 1;
-      const theta = Math.acos(costheta);
-      const rChaos = 8.0 + Math.random() * 11.0;
-      const cx = rChaos * Math.sin(theta) * Math.cos(phi);
-      const cy = rChaos * Math.cos(theta) - 1.5;
-      const cz = rChaos * Math.sin(theta) * Math.sin(phi);
+      const colorIndex = treePalette
+        ? palette.length + Math.min(treePalette.length - 1, Math.floor(t * treePalette.length))
+        : Math.floor(Math.random() * palette.length);
+      const originalColor: ColorRGB =
+        treePalette && colorIndex >= palette.length
+          ? treePalette[colorIndex - palette.length]
+          : palette[colorIndex];
 
       pts.push({
         x: Math.cos(ang) * radius + rand(j, -j),
         y: -9 + t * 15.2 + rand(j, -j),
         z: Math.sin(ang) * radius + rand(j, -j),
-        cx,
-        cy,
-        cz,
         t: t,
-        c: treePalette
-          ? palette.length + Math.min(treePalette.length - 1, Math.floor(t * treePalette.length))
-          : Math.floor(Math.random() * palette.length),
+        c: colorIndex,
+        originalColor,
         base: ornament ? rand(0.9, 1.25) : rand(0.15, 0.3),
         phase: rand(TAU),
         fade: t > 0.9 ? 1 - ((t - 0.9) / 0.1) * 0.6 : 1,
         sx: ep[0],
         sy: ep[1],
+        portraitX: 0.5,
+        portraitY: 0.5,
+        portraitLight: 0,
       });
     }
+    if (portraitTargetsRef.current) assignPortraitTargets(pts, portraitTargetsRef.current);
     treePointsRef.current = pts;
 
     // 2. Orbiting Points (Fairy dust)
@@ -616,6 +677,45 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
     settings.petalCount,
     settings.meteorCount,
   ]);
+
+  useEffect(() => {
+    const requestId = ++portraitRequestRef.current;
+    portraitTargetsRef.current = null;
+    portraitAspectRef.current = 1;
+    onPortraitStatusUpdate?.('loading');
+    const image = new window.Image();
+    image.crossOrigin = 'anonymous';
+    const fail = (error: Error) => {
+      if (portraitRequestRef.current !== requestId) return;
+      portraitTargetsRef.current = null;
+      onPortraitStatusUpdate?.('error', error.message);
+      console.error('Unable to process the tree portrait image.', error);
+    };
+    image.onload = () => {
+      void processPortraitImage(image)
+        .then((targets) => {
+          if (portraitRequestRef.current !== requestId) return;
+          portraitTargetsRef.current = targets;
+          portraitAspectRef.current = targets.aspect;
+          assignPortraitTargets(treePointsRef.current, targets);
+          onPortraitStatusUpdate?.('ready');
+        })
+        .catch((error: unknown) => {
+          fail(error instanceof Error ? error : new Error(String(error)));
+        });
+    };
+    image.onerror = () => {
+      fail(new Error(`Unable to load tree portrait image: ${settings.portraitUrl}`));
+    };
+    if (settings.portraitUrl) image.src = settings.portraitUrl;
+    else fail(new Error('Choose a portrait image before expanding the tree'));
+
+    return () => {
+      portraitRequestRef.current += 1;
+      image.onload = null;
+      image.onerror = null;
+    };
+  }, [settings.portraitUrl, onPortraitStatusUpdate]);
 
   // Expose controls to parent via ref
   useImperativeHandle(ref, () => ({
@@ -751,11 +851,21 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
       const pitch = manualRotRef.current.pitch;
       const projectFrame = createProjector(yaw, pitch, w, h, effFocal);
 
-      // Chaos vs Formed scatter factor (smooth spring interpolation)
-      const targetScatter = frameSettings.treeState === 'dispersed' ? 1 : 0;
+      const hasPortrait = portraitTargetsRef.current !== null;
+      const targetScatter = frameSettings.treeState === 'dispersed' && hasPortrait ? 1 : 0;
       const scatterEase = 1 - Math.exp(-3.7 * dt);
       scatterRef.current += (targetScatter - scatterRef.current) * scatterEase;
       const scatter = scatterRef.current;
+      const portraitProgress = hasPortrait ? scatter : 0;
+      const portraitClarity = 1 - portraitProgress;
+      const particleProjectFrame = hasPortrait
+        ? createProjector(yaw * (1 - portraitProgress), pitch * (1 - portraitProgress), w, h, effFocal)
+        : projectFrame;
+      const portraitAspect = portraitTargetsRef.current?.aspect ?? portraitAspectRef.current;
+      const portraitWidth = Math.min(w * 0.7, h * 0.72 * portraitAspect);
+      const portraitHeight = portraitWidth / portraitAspect;
+      const portraitLeft = (w - portraitWidth) / 2;
+      const portraitTop = (h - portraitHeight) / 2;
       if (frameSettings.treeState !== 'formed' || !frameSettings.showStar) {
         starSequenceRef.current = 0;
       } else if (scatter < 0.06 && intro >= 0.9) {
@@ -801,7 +911,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         const size = f.r * 2;
         const flick = 0.7 + 0.3 * Math.sin(time * 1.2 + f.drift);
         const flare = Math.pow(Math.max(0, Math.sin(time * 0.7 + f.drift * 3)), 12);
-        ctx.globalAlpha = Math.min(1, f.alpha * (flick + flare));
+        ctx.globalAlpha = Math.min(1, f.alpha * (flick + flare)) * portraitClarity;
         ctx.drawImage(sprites[0], f.x - size / 2, f.y - size / 2, size, size);
       }
 
@@ -825,7 +935,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
           lg.addColorStop(0, `rgba(${c0[0]},${c0[1]},${c0[2]},0)`);
           lg.addColorStop(1, `rgba(255,255,255,${0.9 * a})`);
 
-          ctx.globalAlpha = 1;
+          ctx.globalAlpha = portraitClarity;
           ctx.strokeStyle = lg;
           ctx.lineWidth = 2.2;
           ctx.beginPath();
@@ -834,7 +944,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
           ctx.stroke();
 
           const sz = 16 * a;
-          ctx.globalAlpha = a;
+          ctx.globalAlpha = a * portraitClarity;
           ctx.drawImage(sprites[0], x - sz / 2, y - sz / 2, sz, sz);
         }
       }
@@ -868,16 +978,17 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
 
       for (let i = 0; i < pts.length; i++) {
         const pt = pts[i];
-        // Interpolate between conical Christmas tree and dispersed star galaxy
-        const curX = pt.x * (1 - scatter) + pt.cx * scatter;
-        const curY = pt.y * (1 - scatter) + pt.cy * scatter;
-        const curZ = pt.z * (1 - scatter) + pt.cz * scatter;
-
-        const p = projectFrame(curX * breathe, curY, curZ * breathe);
+        const p = particleProjectFrame(pt.x * breathe, pt.y, pt.z * breathe);
         const px = w / 2 + (p.x - w / 2) * intro;
         const py = h / 2 + (p.y - h / 2) * intro;
         let cx = pt.sx + (px - pt.sx) * intro;
         let cy = pt.sy + (py - pt.sy) * intro;
+        if (hasPortrait) {
+          const targetX = portraitLeft + pt.portraitX * portraitWidth;
+          const targetY = portraitTop + pt.portraitY * portraitHeight;
+          cx += (targetX - cx) * portraitProgress;
+          cy += (targetY - cy) * portraitProgress;
+        }
 
         const gathering = 1 - intro;
         const drift = gathering * Math.min(w, h) * 0.045;
@@ -893,12 +1004,33 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         const wave = 0.5 + 0.5 * Math.sin(time * 3.5 - pt.t * 26);
         const spark = Math.pow(Math.max(0, Math.sin(time * 2.2 + pt.phase * 2)), 16);
         const glow = (0.4 + 0.35 * twinkle + 0.45 * wave * wave + 0.6 * spark) * heartbeat;
-        let size = pt.base * p.scale * (0.8 + 0.4 * twinkle + 0.3 * wave + 0.5 * spark);
+        const treeSize = pt.base * p.scale * (0.8 + 0.4 * twinkle + 0.3 * wave + 0.5 * spark);
+        let size = treeSize * (1 - portraitProgress) + (1.2 + pt.portraitLight * 0.4) * portraitProgress;
         if (size < 1) size = 1;
 
-        ctx.globalAlpha = Math.min(1, glow * (0.4 + 0.6 * depth) * pt.fade * (0.4 + 0.6 * intro));
-        const spr = sprites[pt.c] || sprites[0];
-        ctx.drawImage(spr, cx - size / 2, cy - size / 2, size, size);
+        const baseAlpha = Math.min(1, glow * (0.4 + 0.6 * depth) * pt.fade * (0.4 + 0.6 * intro));
+        const portraitTwinkle = 0.78 + 0.22 * Math.sin(time * 8 + pt.phase * 2.7);
+        const portraitVisibility = (0.2 + 0.8 * pt.portraitLight) * portraitTwinkle;
+        const originalSprite = sprites[pt.c] || sprites[0];
+        const portraitSprite = sprites[frameTheme.palette.length - 1] || sprites[0];
+        ctx.globalAlpha = baseAlpha * (1 - portraitProgress);
+        ctx.drawImage(originalSprite, cx - size / 2, cy - size / 2, size, size);
+        if (portraitProgress > 0) {
+          const [originalR, originalG, originalB] = pt.originalColor;
+          const red = Math.round(originalR + (255 - originalR) * portraitProgress);
+          const green = Math.round(originalG + (255 - originalG) * portraitProgress);
+          const blue = Math.round(originalB + (255 - originalB) * portraitProgress);
+          ctx.globalCompositeOperation = 'lighter';
+          ctx.globalAlpha = baseAlpha * portraitProgress * portraitVisibility;
+          ctx.drawImage(portraitSprite, cx - size / 2, cy - size / 2, size, size);
+          ctx.globalCompositeOperation = 'source-over';
+          ctx.globalAlpha = baseAlpha * portraitProgress * portraitVisibility;
+          ctx.fillStyle = `rgb(${red}, ${green}, ${blue})`;
+          ctx.beginPath();
+          ctx.arc(cx, cy, Math.max(0.6, size * 0.44), 0, TAU);
+          ctx.fill();
+        }
+        ctx.globalCompositeOperation = 'lighter';
       }
 
       // Draw a dense, multicolored brown sparkle trunk, revealed from the roots upward.
@@ -952,7 +1084,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
           const p = projectFrame(Math.cos(a) * o.r, yy, Math.sin(a) * o.r);
           const tw = 0.5 + 0.5 * Math.sin(time * 3 + o.ph);
           const size = o.size * p.scale * (0.8 + 0.5 * tw);
-          ctx.globalAlpha = (0.35 + 0.5 * tw) * 0.85;
+          ctx.globalAlpha = (0.35 + 0.5 * tw) * 0.85 * portraitClarity;
           const spr = sprites[o.c] || sprites[0];
           ctx.drawImage(spr, p.x - size / 2, p.y - size / 2, size, size);
         }
@@ -974,7 +1106,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
           ctx.save();
           ctx.translate(p.x, p.y);
           ctx.rotate(p.rot);
-          ctx.globalAlpha = 0.55;
+          ctx.globalAlpha = 0.55 * portraitClarity;
           ctx.fillStyle = frameTheme.petalColor;
           ctx.beginPath();
           ctx.ellipse(0, 0, p.r, p.r * 0.55, 0, 0, TAU);
@@ -1103,7 +1235,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
           bp.alpha = 1 - progress;
 
           if (bp.life < bp.maxLife) {
-            ctx.globalAlpha = bp.alpha;
+            ctx.globalAlpha = bp.alpha * portraitClarity;
             const spr = sprites[bp.colorIdx] || sprites[0];
             const sz = bp.size * (1 + (1 - progress) * 2);
             ctx.drawImage(spr, bp.x - sz / 2, bp.y - sz / 2, sz, sz);
@@ -1116,7 +1248,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
       // 10. Greeting Text
       if (frameSettings.showGreeting && frameSettings.greetingText.trim().length > 0) {
         ctx.globalCompositeOperation = 'source-over';
-        ctx.globalAlpha = 1;
+        ctx.globalAlpha = portraitClarity;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 

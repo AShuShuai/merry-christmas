@@ -17,7 +17,7 @@ import {
   Plus,
   Trash2,
 } from 'lucide-react';
-import { TreeSettings, ThemeId, GreetingFont, MemoryPhoto } from '../types';
+import { TreeSettings, ThemeId, GreetingFont, MemoryPhoto, PortraitLoadStatus } from '../types';
 import { THEMES } from '../config/themes';
 import { DEFAULT_PHOTOS } from '../config/defaultPhotos';
 import { CanvasHandle } from './ChristmasTreeCanvas';
@@ -25,6 +25,7 @@ import { CanvasHandle } from './ChristmasTreeCanvas';
 interface Props {
   settings: TreeSettings;
   onUpdateSettings: (updater: (prev: TreeSettings) => TreeSettings) => void;
+  portraitStatus: { status: PortraitLoadStatus; message?: string };
   canvasRef: React.RefObject<CanvasHandle>;
   onToggleAudio: () => void;
 }
@@ -32,6 +33,7 @@ interface Props {
 export const ControlsPanel = React.memo<Props>(({
   settings,
   onUpdateSettings,
+  portraitStatus,
   canvasRef,
   onToggleAudio,
 }) => {
@@ -44,6 +46,7 @@ export const ControlsPanel = React.memo<Props>(({
   const [newTitle, setNewTitle] = useState<string>('');
   const [newSubtitle, setNewSubtitle] = useState<string>('');
   const [newImgUrl, setNewImgUrl] = useState<string>('');
+  const [portraitUploadError, setPortraitUploadError] = useState('');
 
   const themesList = Object.values(THEMES);
 
@@ -58,6 +61,47 @@ export const ControlsPanel = React.memo<Props>(({
       if (result) {
         setNewImgUrl(result);
       }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handlePortraitUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setPortraitUploadError('');
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result !== 'string') {
+        setPortraitUploadError('Impossibile leggere il file selezionato.');
+        return;
+      }
+
+      const image = new window.Image();
+      image.onload = () => {
+        try {
+          const scale = Math.min(1, 1024 / Math.max(image.naturalWidth, image.naturalHeight));
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+          canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+          const context = canvas.getContext('2d');
+          if (!context) throw new Error('Canvas 2D context is unavailable');
+          context.drawImage(image, 0, 0, canvas.width, canvas.height);
+          const portraitUrl = canvas.toDataURL('image/jpeg', 0.84);
+          onUpdateSettings((prev) => ({ ...prev, portraitUrl }));
+        } catch (error) {
+          console.error('Unable to prepare the selected portrait image.', error);
+          setPortraitUploadError('Impossibile preparare questa immagine per il ritratto.');
+        }
+      };
+      image.onerror = () => {
+        setPortraitUploadError('Il file selezionato non è un’immagine valida.');
+      };
+      image.src = reader.result;
+    };
+    reader.onerror = () => {
+      console.error('Unable to read the selected portrait image.', reader.error);
+      setPortraitUploadError('Impossibile leggere il file selezionato.');
     };
     reader.readAsDataURL(file);
   };
@@ -150,7 +194,7 @@ export const ControlsPanel = React.memo<Props>(({
           >
             <h2 className="mb-2 font-semibold text-cyan-200">Gesti della mano</h2>
             <p className="mb-1.5">Muovi la mano per ruotare l'albero.</p>
-            <p className="mb-1.5">Palmo aperto: disperdi l'albero; pugno: ricomponilo.</p>
+            <p className="mb-1.5">Palmo aperto: trasforma l'albero nel ritratto; pugno: ricomponilo.</p>
             <p>Pizzica con indice e pollice per aprire una foto.</p>
           </div>
         )}
@@ -271,8 +315,62 @@ export const ControlsPanel = React.memo<Props>(({
                         : 'bg-white/[0.03] border-white/10 text-white/60 hover:text-white'
                     }`}
                   >
-                    <span>✨ Esploso (🖐️)</span>
+                    <span>✨ Ritratto (🖐️)</span>
                   </button>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 space-y-3">
+                  <h4 className="font-semibold text-white flex items-center gap-1.5">
+                    <Sparkles size={14} className="text-amber-300" />
+                    <span>Ritratto di scintille</span>
+                  </h4>
+                  <label className="block text-[11px] text-white/70">
+                    Usa una foto dei ricordi
+                    <select
+                      value={settings.portraitUrl}
+                      onChange={(e) => {
+                        setPortraitUploadError('');
+                        onUpdateSettings((prev) => ({ ...prev, portraitUrl: e.target.value }));
+                      }}
+                      className="mt-1 w-full px-3 py-2 rounded-xl bg-slate-950 border border-white/15 text-white focus:outline-none focus:border-amber-300"
+                    >
+                      <option value="/chiara-portrait.jpg">Ritratto predefinito</option>
+                      {settings.photos.map((photo) => (
+                        <option key={photo.id} value={photo.url}>
+                          {photo.title}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block text-[11px] text-white/70">
+                    Oppure carica un altro ritratto
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handlePortraitUpload}
+                      className="mt-1 w-full text-[11px] text-white/60 file:mr-2 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:bg-amber-400/20 file:text-amber-100 file:font-semibold hover:file:bg-amber-400/30 cursor-pointer"
+                    />
+                  </label>
+                  {settings.portraitUrl && (
+                    <img
+                      src={settings.portraitUrl}
+                      alt="Anteprima del ritratto"
+                      className="w-16 h-16 object-cover rounded-lg border border-amber-300/40"
+                    />
+                  )}
+                  {portraitUploadError ? (
+                    <p role="alert" className="text-[10px] text-red-300">{portraitUploadError}</p>
+                  ) : portraitStatus.status === 'error' ? (
+                    <p role="alert" className="text-[10px] text-red-300">
+                      Ritratto non pronto: {portraitStatus.message}
+                    </p>
+                  ) : (
+                    <p className="text-[10px] text-white/45" aria-live="polite">
+                      {portraitStatus.status === 'loading'
+                        ? 'Caricamento MediaPipe e analisi della foto...'
+                        : 'Ritratto pronto: i tratti del volto diventano bianchi e tornano ai colori dell’albero.'}
+                    </p>
+                  )}
                 </div>
 
                 {/* Show/Hide Photos Toggle */}

@@ -27,6 +27,7 @@ export interface Theme {
 }
 
 export type GreetingFont = 'cursive' | 'serif' | 'cinzel';
+export type PortraitLoadStatus = 'loading' | 'ready' | 'error';
 
 export interface MemoryPhoto {
   id: string;
@@ -85,6 +86,7 @@ export interface TreeSettings {
   // Hand Tracking, Photos & Chaos Mode
   showPhotos: boolean;
   photos: MemoryPhoto[];
+  portraitUrl: string;
   treeState: 'formed' | 'dispersed';
 }
 
@@ -92,17 +94,17 @@ export interface TreePoint {
   x: number;
   y: number;
   z: number;
-  // Dispersed / Chaos coordinates
-  cx: number;
-  cy: number;
-  cz: number;
   t: number;
   c: number;
+  originalColor: ColorRGB;
   base: number;
   phase: number;
   fade: number;
   sx: number;
   sy: number;
+  portraitX: number;
+  portraitY: number;
+  portraitLight: number;
 }
 
 export interface OrbitPoint {

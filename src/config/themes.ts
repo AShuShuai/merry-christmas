@@ -215,5 +215,6 @@ export const DEFAULT_SETTINGS: TreeSettings = {
   musicEnabled: false,
   showPhotos: true,
   photos: DEFAULT_PHOTOS,
+  portraitUrl: '/chiara-portrait.jpg',
   treeState: 'formed',
 };

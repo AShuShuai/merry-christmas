@@ -34,6 +34,7 @@ interface Props {
   scatter?: number;
   introProgress: number;
   treeIsDispersed: boolean;
+  portraitReady: boolean;
   gestureState: HandGestureState;
   onSelectPhoto: (photo: MemoryPhoto, origin?: PhotoTransitionOrigin) => void;
   onPhotoOriginUpdate: (photoId: string, origin: PhotoTransitionOrigin) => void;
@@ -53,6 +54,7 @@ export const FloatingPhotosOverlay: React.FC<Props> = ({
   scatter = 0,
   introProgress,
   treeIsDispersed,
+  portraitReady,
   gestureState,
   onSelectPhoto,
   onPhotoOriginUpdate,
@@ -91,9 +93,9 @@ export const FloatingPhotosOverlay: React.FC<Props> = ({
   const cursorScreenY = gestureState.cursorY * height;
   const revealProgress = Math.max(0, Math.min(1, (scatter - 0.16) / 0.42));
   const photoVisibility = treeIsDispersed
-    ? revealProgress * revealProgress * (3 - 2 * revealProgress)
+    ? revealProgress * revealProgress * (3 - 2 * revealProgress) * (portraitReady ? 1 - scatter : 1)
     : 0;
-  const photosReady = introProgress >= 1 && treeIsDispersed && scatter >= 0.58;
+  const photosReady = introProgress >= 1 && treeIsDispersed && scatter >= 0.58 && !portraitReady;
   const photoIds = photos.map((photo) => photo.id).join('|');
   if (photoIdsRef.current !== photoIds) {
     const positions = new Map<string, OrbitPosition>();
