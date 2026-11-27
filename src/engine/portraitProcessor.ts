@@ -37,7 +37,7 @@ const MEDIAPIPE_WASM = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.2
 const FACE_MODEL =
   'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
 
-const TOTAL_PORTRAIT_POINTS = 9800;
+const TOTAL_PORTRAIT_POINTS = 9600;
 const TAU = Math.PI * 2;
 
 let tasksPromise: Promise<PortraitTasks> | null = null;
@@ -78,6 +78,7 @@ interface Bounds {
 }
 
 // Generates dense 2D micro-pointillism within a facial feature zone
+// Keeping dark features (pupils, dark irises, nostril shadows) empty for high contrast
 function generateFeatureAreaPoints(
   landmarks: Landmark[],
   indices: number[],
@@ -90,7 +91,8 @@ function generateFeatureAreaPoints(
   weightBase: number,
   sizeMin: number,
   sizeMax: number,
-  spreadFactor: number = 0.007
+  minLightThreshold: number = 0.32,
+  spreadFactor: number = 0.006
 ): PortraitPoint[] {
   const points: PortraitPoint[] = [];
   const coords = indices.map((idx) => landmarks[idx]).filter(Boolean);
@@ -114,8 +116,8 @@ function generateFeatureAreaPoints(
 
   const centerX = sumX / coords.length;
   const centerY = sumY / coords.length;
-  const halfW = Math.max(0.007, (maxX - minX) * 0.55 + spreadFactor);
-  const halfH = Math.max(0.005, (maxY - minY) * 0.55 + spreadFactor);
+  const halfW = Math.max(0.006, (maxX - minX) * 0.54 + spreadFactor);
+  const halfH = Math.max(0.005, (maxY - minY) * 0.54 + spreadFactor);
 
   for (let i = 0; i < count; i++) {
     const angle = Math.random() * TAU;
@@ -123,6 +125,7 @@ function generateFeatureAreaPoints(
     const rawX = centerX + Math.cos(angle) * halfW * radius + (Math.random() - 0.5) * spreadFactor;
     const rawY = centerY + Math.sin(angle) * halfH * radius + (Math.random() - 0.5) * spreadFactor;
 
+    // Discard any point out of bounds (DO NOT CLAMP, avoiding rectangular borders)
     if (
       rawX < bounds.left ||
       rawX > bounds.left + bounds.width ||
@@ -132,25 +135,34 @@ function generateFeatureAreaPoints(
       continue;
     }
 
-    const normX = clamp01((rawX - bounds.left) / bounds.width);
-    const normY = clamp01((rawY - bounds.top) / bounds.height);
+    const normX = (rawX - bounds.left) / bounds.width;
+    const normY = (rawY - bounds.top) / bounds.height;
+    if (normX < 0.02 || normX > 0.98 || normY < 0.02 || normY > 0.98) continue;
 
     const pixelX = Math.max(0, Math.min(imageWidth - 1, Math.round(rawX * (imageWidth - 1))));
     const pixelY = Math.max(0, Math.min(imageHeight - 1, Math.round(rawY * (imageHeight - 1))));
-    const pixelLight = luminance[pixelY * imageWidth + pixelX] ?? 0.7;
+    const rawLight = luminance[pixelY * imageWidth + pixelX] ?? 0.65;
 
-    const jitterX = (Math.random() - 0.5) * 0.0018;
-    const jitterY = (Math.random() - 0.5) * 0.0018;
+    // HIGH CONTRAST CHECK: keep dark features (pupils, deep shadows) genuinely dark/empty!
+    if (rawLight < minLightThreshold) {
+      continue;
+    }
+
+    const contrastLight = Math.pow((rawLight - minLightThreshold) / (1 - minLightThreshold), 1.3);
+
+    const jitterX = (Math.random() - 0.5) * 0.0016;
+    const jitterY = (Math.random() - 0.5) * 0.0016;
+    // Fine particle sizes: 0.5px to 1.1px radius
     const size = sizeMin + Math.random() * (sizeMax - sizeMin);
-    const isSparkle = Math.random() < 0.08;
+    const isSparkle = Math.random() < 0.06;
 
     points.push({
       x: clamp01(normX + jitterX),
       y: clamp01(normY + jitterY),
       z: zBase + (Math.random() - 0.5) * 0.06,
       weight: weightBase,
-      light: clamp01(pixelLight),
-      size: isSparkle ? size * 1.5 : size,
+      light: clamp01(contrastLight),
+      size,
       phase: Math.random() * TAU,
       speed: 1.8 + Math.random() * 2.2,
       jitterX,
@@ -164,7 +176,7 @@ function generateFeatureAreaPoints(
   return points;
 }
 
-// Generate dense pointillism along facial feature curves without 1D lines (2D soft ribbon sampling)
+// Generate dense pointillism along feature curves (soft ribbon sampling)
 function generateRibbonPoints(
   landmarks: Landmark[],
   chain: number[],
@@ -177,7 +189,8 @@ function generateRibbonPoints(
   weightBase: number,
   ribbonWidth: number,
   sizeMin: number,
-  sizeMax: number
+  sizeMax: number,
+  minLightThreshold: number = 0.3
 ): PortraitPoint[] {
   const points: PortraitPoint[] = [];
   const coords = chain.map((idx) => landmarks[idx]).filter(Boolean);
@@ -199,8 +212,8 @@ function generateRibbonPoints(
     const ny = dx / len;
 
     const offset = (Math.random() - 0.5) * 2 * ribbonWidth;
-    const rawX = baseX + nx * offset + (Math.random() - 0.5) * 0.002;
-    const rawY = baseY + ny * offset + (Math.random() - 0.5) * 0.002;
+    const rawX = baseX + nx * offset + (Math.random() - 0.5) * 0.0018;
+    const rawY = baseY + ny * offset + (Math.random() - 0.5) * 0.0018;
 
     if (
       rawX < bounds.left ||
@@ -211,25 +224,32 @@ function generateRibbonPoints(
       continue;
     }
 
-    const normX = clamp01((rawX - bounds.left) / bounds.width);
-    const normY = clamp01((rawY - bounds.top) / bounds.height);
+    const normX = (rawX - bounds.left) / bounds.width;
+    const normY = (rawY - bounds.top) / bounds.height;
+    if (normX < 0.02 || normX > 0.98 || normY < 0.02 || normY > 0.98) continue;
 
     const pixelX = Math.max(0, Math.min(imageWidth - 1, Math.round(rawX * (imageWidth - 1))));
     const pixelY = Math.max(0, Math.min(imageHeight - 1, Math.round(rawY * (imageHeight - 1))));
-    const pixelLight = luminance[pixelY * imageWidth + pixelX] ?? 0.7;
+    const rawLight = luminance[pixelY * imageWidth + pixelX] ?? 0.65;
 
-    const jitterX = (Math.random() - 0.5) * 0.0018;
-    const jitterY = (Math.random() - 0.5) * 0.0018;
+    // High contrast check
+    if (rawLight < minLightThreshold) {
+      continue;
+    }
+    const contrastLight = Math.pow((rawLight - minLightThreshold) / (1 - minLightThreshold), 1.3);
+
+    const jitterX = (Math.random() - 0.5) * 0.0016;
+    const jitterY = (Math.random() - 0.5) * 0.0016;
     const size = sizeMin + Math.random() * (sizeMax - sizeMin);
-    const isSparkle = Math.random() < 0.08;
+    const isSparkle = Math.random() < 0.06;
 
     points.push({
       x: clamp01(normX + jitterX),
       y: clamp01(normY + jitterY),
       z: zBase + (Math.random() - 0.5) * 0.06,
       weight: weightBase,
-      light: clamp01(pixelLight),
-      size: isSparkle ? size * 1.5 : size,
+      light: clamp01(contrastLight),
+      size,
       phase: Math.random() * TAU,
       speed: 1.8 + Math.random() * 2.2,
       jitterX,
@@ -270,17 +290,28 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
   const isCutoutBg = new Uint8Array(imageWidth * imageHeight);
   const isSkin = new Uint8Array(imageWidth * imageHeight);
 
-  // Analyze RGB: Detect pure white background cutout vs Chiara's skin and hair
+  // 1. 5% PADDING MARGIN ON ALL FOUR EDGES (Completely eliminates rectangular border artifacts)
+  const marginX = Math.round(imageWidth * 0.05);
+  const marginY = Math.round(imageHeight * 0.05);
+
   for (let y = 0; y < imageHeight; y++) {
     for (let x = 0; x < imageWidth; x++) {
       const idx = y * imageWidth + x;
+
+      // Ignore 5% padding margin on all 4 edges
+      if (x < marginX || x >= imageWidth - marginX || y < marginY || y >= imageHeight - marginY) {
+        isCutoutBg[idx] = 1;
+        luminance[idx] = 0;
+        continue;
+      }
+
       const off = idx * 4;
       const r = data[off];
       const g = data[off + 1];
       const b = data[off + 2];
 
-      // Pure white or near-white background cutout (cutout edges)
-      const isWhiteBg = r > 230 && g > 230 && b > 230;
+      // Pure white or near-white background cutout
+      const isWhiteBg = r > 228 && g > 228 && b > 228;
       isCutoutBg[idx] = isWhiteBg ? 1 : 0;
 
       luminance[idx] = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
@@ -298,9 +329,9 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
     }
   }
 
-  // Compute Sobel edges for textural detail (hair strands, eyes, lips, jawline)
-  for (let y = 1; y < imageHeight - 1; y++) {
-    for (let x = 1; x < imageWidth - 1; x++) {
+  // Compute Sobel edges (ignoring 5% margin)
+  for (let y = marginY + 1; y < imageHeight - marginY - 1; y++) {
+    for (let x = marginX + 1; x < imageWidth - marginX - 1; x++) {
       const idx = y * imageWidth + x;
       if (isCutoutBg[idx]) continue;
 
@@ -315,7 +346,7 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
 
       const gx = -tl + tr - 2 * ml + 2 * mr - bl + br;
       const gy = -tl - 2 * tc - tr + bl + 2 * bc + br;
-      edges[idx] = Math.min(1, Math.hypot(gx, gy) * 1.6);
+      edges[idx] = Math.min(1, Math.hypot(gx, gy) * 1.5);
     }
   }
 
@@ -332,7 +363,7 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
     }
   }
 
-  // Determine portrait framing bounds
+  // Determine portrait framing bounds (constrained within 5% margins)
   let bounds: Bounds;
   if (landmarks && landmarks.length >= 20) {
     const xs = landmarks.map((l) => l.x);
@@ -344,15 +375,14 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
     const fWidth = fRight - fLeft;
     const fHeight = fBottom - fTop;
 
-    // Head, full hair flow and shoulders (matching Image 1 framing)
-    const padX = fWidth * 0.72;
-    const padTop = fHeight * 0.38;
-    const padBottom = fHeight * 0.98;
+    const padX = fWidth * 0.68;
+    const padTop = fHeight * 0.35;
+    const padBottom = fHeight * 0.92;
 
-    const bLeft = Math.max(0, fLeft - padX);
-    const bRight = Math.min(1, fRight + padX);
-    const bTop = Math.max(0, fTop - padTop);
-    const bBottom = Math.min(1, fBottom + padBottom);
+    const bLeft = Math.max(0.06, fLeft - padX);
+    const bRight = Math.min(0.94, fRight + padX);
+    const bTop = Math.max(0.06, fTop - padTop);
+    const bBottom = Math.min(0.92, fBottom + padBottom);
 
     bounds = {
       left: bLeft,
@@ -361,36 +391,20 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
       height: Math.max(0.1, bBottom - bTop),
     };
   } else {
-    // Find bounds from non-white foreground
-    let left = 1;
-    let right = 0;
-    let top = 1;
-    let bottom = 0;
-    for (let y = 0; y < imageHeight; y++) {
-      for (let x = 0; x < imageWidth; x++) {
-        if (!isCutoutBg[y * imageWidth + x]) {
-          const nx = x / (imageWidth - 1);
-          const ny = y / (imageHeight - 1);
-          left = Math.min(left, nx);
-          right = Math.max(right, nx);
-          top = Math.min(top, ny);
-          bottom = Math.max(bottom, ny);
-        }
-      }
-    }
     bounds = {
-      left: Math.max(0, left - 0.02),
-      top: Math.max(0, top - 0.02),
-      width: Math.min(1, right + 0.02) - Math.max(0, left - 0.02),
-      height: Math.min(1, bottom + 0.02) - Math.max(0, top - 0.02),
+      left: 0.08,
+      top: 0.08,
+      width: 0.84,
+      height: 0.84,
     };
   }
 
   const allPoints: PortraitPoint[] = [];
 
   // 1. Detailed Facial Feature Micro-Points (Eyes, Brows, Nose, Lips)
+  // Fine radii (0.5px to 1.05px) and dark pupil/iris exclusion
   if (landmarks && landmarks.length >= 400) {
-    // Left Eye & Iris (Thick, sparkling gaze)
+    // Left Eye Area: Sclera and highlights only (pupil < 0.35 kept empty!)
     const leftEyePoints = generateFeatureAreaPoints(
       landmarks,
       [33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246, 468, 469, 470, 471, 472],
@@ -398,16 +412,17 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
       luminance,
       imageWidth,
       imageHeight,
-      450,
+      380,
       0.15,
-      3.5,
-      0.9,
-      1.6,
+      3.0,
+      0.5,
+      0.95,
+      0.34,
       0.003
     );
     allPoints.push(...leftEyePoints);
 
-    // Right Eye & Iris
+    // Right Eye Area
     const rightEyePoints = generateFeatureAreaPoints(
       landmarks,
       [362, 382, 381, 380, 374, 373, 390, 249, 263, 466, 388, 387, 386, 385, 384, 398, 473, 474, 475, 476, 477],
@@ -415,16 +430,17 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
       luminance,
       imageWidth,
       imageHeight,
-      450,
+      380,
       0.15,
-      3.5,
-      0.9,
-      1.6,
+      3.0,
+      0.5,
+      0.95,
+      0.34,
       0.003
     );
     allPoints.push(...rightEyePoints);
 
-    // Left Eyebrow Ribbon
+    // Left Eyebrow Ribbon: Skin highlights framing brow (dark hair < 0.28 kept empty)
     const leftBrowPoints = generateRibbonPoints(
       landmarks,
       [70, 63, 105, 66, 107, 55, 65, 52, 53, 46],
@@ -432,12 +448,13 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
       luminance,
       imageWidth,
       imageHeight,
-      360,
+      280,
       0.32,
-      3.0,
-      0.009,
-      0.8,
-      1.5
+      2.6,
+      0.008,
+      0.5,
+      0.9,
+      0.28
     );
     allPoints.push(...leftBrowPoints);
 
@@ -449,16 +466,17 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
       luminance,
       imageWidth,
       imageHeight,
-      360,
+      280,
       0.32,
-      3.0,
-      0.009,
-      0.8,
-      1.5
+      2.6,
+      0.008,
+      0.5,
+      0.9,
+      0.28
     );
     allPoints.push(...rightBrowPoints);
 
-    // Nose Bridge & Ridge (High 3D Protrusion & Brilliant Highlight)
+    // Nose Bridge & Ridge: Highlight crest
     const noseRidge = generateRibbonPoints(
       landmarks,
       [168, 6, 197, 195, 5, 4, 1, 2],
@@ -466,16 +484,17 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
       luminance,
       imageWidth,
       imageHeight,
-      450,
+      380,
       0.85,
-      3.5,
-      0.012,
-      1.1,
-      2.0
+      3.2,
+      0.010,
+      0.65,
+      1.15,
+      0.38
     );
     allPoints.push(...noseRidge);
 
-    // Nose Base & Nostril Contours
+    // Nose Base & Tip Contours (nostril cavity < 0.28 kept empty)
     const noseBase = generateFeatureAreaPoints(
       landmarks,
       [98, 97, 2, 326, 327, 278, 48, 115, 220, 45, 275, 440],
@@ -483,16 +502,17 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
       luminance,
       imageWidth,
       imageHeight,
-      300,
+      240,
       0.55,
-      2.8,
-      0.8,
-      1.5,
-      0.006
+      2.5,
+      0.55,
+      1.0,
+      0.32,
+      0.005
     );
     allPoints.push(...noseBase);
 
-    // Lips & Mouth (Soft curvature, vermilion border, bright lower lip highlight)
+    // Lips & Mouth: Bright highlight on lower lip cushion and cupid's bow (lip seam < 0.3 kept empty)
     const lipsPoints = generateFeatureAreaPoints(
       landmarks,
       [
@@ -503,17 +523,18 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
       luminance,
       imageWidth,
       imageHeight,
-      850,
+      680,
       0.48,
-      3.5,
-      0.9,
-      1.8,
-      0.009
+      3.2,
+      0.55,
+      1.1,
+      0.30,
+      0.008
     );
     allPoints.push(...lipsPoints);
   }
 
-  // 2. High-Density Skin Chiaroscuro & Full Hair Volume
+  // 2. High-Density Skin Chiaroscuro & Feathered Hair / Shoulders
   const faceCenter = {
     x: bounds.left + bounds.width * 0.48,
     y: bounds.top + bounds.height * 0.38,
@@ -523,19 +544,19 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
   const densityField = new Float32Array(imageWidth * imageHeight);
   let totalDensity = 0;
 
-  for (let y = 0; y < imageHeight; y++) {
+  for (let y = marginY; y < imageHeight - marginY; y++) {
     const rawY = y / (imageHeight - 1);
     if (rawY < bounds.top || rawY > bounds.top + bounds.height) continue;
 
     const normY = (rawY - bounds.top) / bounds.height;
     const dy = rawY - faceCenter.y;
 
-    for (let x = 0; x < imageWidth; x++) {
+    for (let x = marginX; x < imageWidth - marginX; x++) {
       const rawX = x / (imageWidth - 1);
       if (rawX < bounds.left || rawX > bounds.left + bounds.width) continue;
 
       const idx = y * imageWidth + x;
-      if (isCutoutBg[idx]) continue; // Never place on cutout white background!
+      if (isCutoutBg[idx]) continue; // Zero density on cutout white background!
 
       const lum = luminance[idx];
       const edge = edges[idx];
@@ -544,26 +565,34 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
       const dx = (rawX - faceCenter.x) * 1.15;
       const distFromFace = Math.hypot(dx, dy);
 
+      // SHOULDER SOFT FADE-OUT: smoothly fade out bottom edge well above Merry Christmas text
       let fade = 1.0;
-      if (normY > 0.65) {
-        const falloff = (normY - 0.65) / 0.35;
-        fade *= Math.max(0, 1.0 - Math.pow(falloff, 1.1));
+      if (normY > 0.60) {
+        // Drops smoothly to 0 by normY = 0.78
+        fade *= Math.max(0, 1.0 - Math.pow(Math.min(1, (normY - 0.60) / 0.18), 1.25));
       }
-      if (distFromFace > faceRadius * 0.95) {
-        const lateralFalloff = (distFromFace - faceRadius * 0.95) / (faceRadius * 0.55);
-        fade *= Math.max(0, 1.0 - Math.pow(Math.min(1, lateralFalloff), 1.15));
+      if (distFromFace > faceRadius * 0.90) {
+        const lateralFalloff = (distFromFace - faceRadius * 0.90) / (faceRadius * 0.50);
+        fade *= Math.max(0, 1.0 - Math.pow(Math.min(1, lateralFalloff), 1.2));
       }
 
-      // Skin regions: heavy starlight density to create solid, luminous white skin
-      // Hair regions: rich particle flow tracing hair volume and sheen
+      if (fade <= 0.001) continue;
+
+      // HIGH-CONTRAST GAMMA CURVE:
+      // Dark areas (pupils, nostrils, lip seam, dark shadow) receive 0 density!
+      let contrastLum = 0;
+      if (lum > 0.24) {
+        contrastLum = Math.pow((lum - 0.24) / 0.76, 1.45);
+      }
+
       let localDensity = 0;
       if (skinPixel) {
-        const lightFactor = Math.pow(lum, 0.6);
-        localDensity = 4.2 * lightFactor * fade;
+        // High density on inner face skin, shaped by contrast
+        localDensity = 3.6 * (0.15 + 0.85 * contrastLum) * fade;
       } else {
-        // Hair & shoulders: strong stardust presence so hair is thick and visible (Image 1)
-        const hairSheen = Math.pow(lum, 0.7);
-        localDensity = 2.4 * (0.6 + 0.4 * hairSheen + 0.5 * edge) * fade;
+        // Lower density on outer hair silhouette compared to inner face
+        const hairSheen = Math.pow(lum, 0.8);
+        localDensity = 1.35 * (0.3 + 0.7 * hairSheen + 0.4 * edge) * fade;
       }
 
       densityField[idx] = localDensity;
@@ -572,7 +601,7 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
   }
 
   // Allocate remaining points
-  const pointsRemaining = Math.max(3000, TOTAL_PORTRAIT_POINTS - allPoints.length - 1000);
+  const pointsRemaining = Math.max(2500, TOTAL_PORTRAIT_POINTS - allPoints.length - 700);
 
   if (totalDensity > 0) {
     const gridCols = 140;
@@ -590,9 +619,9 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
         let cellDensity = 0;
         let countSamples = 0;
         for (let py = cellYStart; py < cellYEnd; py++) {
-          if (py < 0 || py >= imageHeight) continue;
+          if (py < marginY || py >= imageHeight - marginY) continue;
           for (let px = cellXStart; px < cellXEnd; px++) {
-            if (px < 0 || px >= imageWidth) continue;
+            if (px < marginX || px >= imageWidth - marginX) continue;
             cellDensity += densityField[py * imageWidth + px];
             countSamples++;
           }
@@ -609,6 +638,9 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
           const subX = (gx + Math.random()) / gridCols;
           const subY = (gy + Math.random()) / gridRows;
 
+          // Discard if in the 5% margin
+          if (subX < 0.03 || subX > 0.97 || subY < 0.03 || subY > 0.78) continue;
+
           const rawX = bounds.left + subX * bounds.width;
           const rawY = bounds.top + subY * bounds.height;
 
@@ -620,6 +652,9 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
           const lightVal = luminance[py * imageWidth + px];
           const skinPixel = isSkin[py * imageWidth + px];
 
+          // High contrast check
+          if (lightVal < 0.22) continue;
+
           const distToCenter = Math.hypot(
             (rawX - faceCenter.x) * 1.3,
             rawY - faceCenter.y
@@ -628,17 +663,17 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
           let zVal = (faceDome - 0.45) * 0.75;
           if (subY > 0.65) zVal -= (subY - 0.65) * 0.9;
 
-          const jitterX = (Math.random() - 0.5) * 0.0025;
-          const jitterY = (Math.random() - 0.5) * 0.0025;
+          const jitterX = (Math.random() - 0.5) * 0.002;
+          const jitterY = (Math.random() - 0.5) * 0.002;
 
-          // Prominent stardust sizing: solid cores with diamond sparkles
-          let baseSize = 0.95 + 1.25 * lightVal + (Math.random() - 0.5) * 0.4;
-          if (skinPixel) baseSize += 0.35; // Thicker stardust on face
-          const clampedSize = Math.max(0.85, Math.min(2.8, baseSize));
+          // FINER PARTICLE RADII (0.5px to 1.1px radius, i.e. 1.0px to 2.2px diameter)
+          let baseSize = 0.55 + 0.45 * Math.pow(lightVal, 1.2) + (Math.random() - 0.5) * 0.15;
+          if (skinPixel) baseSize += 0.1;
+          const clampedSize = Math.max(0.5, Math.min(1.1, baseSize));
 
           let priority = 2;
           let category: 'feature' | 'skin' | 'hair' | 'scatter' = 'skin';
-          if (subY > 0.7 || distToCenter > faceRadius * 0.92) {
+          if (subY > 0.68 || distToCenter > faceRadius * 0.90) {
             priority = 4;
             category = 'scatter';
           } else if (!skinPixel) {
@@ -646,15 +681,15 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
             category = 'hair';
           }
 
-          const isSparkle = Math.random() < 0.07;
+          const isSparkle = Math.random() < 0.05;
 
           allPoints.push({
             x: clamp01(subX + jitterX),
             y: clamp01(subY + jitterY),
             z: zVal + (Math.random() - 0.5) * 0.05,
-            weight: skinPixel ? 3.0 : 1.8,
+            weight: skinPixel ? 2.5 : 1.4,
             light: clamp01(lightVal),
-            size: isSparkle ? clampedSize * 1.6 : clampedSize,
+            size: clampedSize,
             phase: Math.random() * TAU,
             speed: 1.5 + Math.random() * 2.5,
             jitterX,
@@ -668,36 +703,40 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
     }
   }
 
-  // 3. Cosmic Nebula Halo & Floating Stars (Matching Image 1's outer stardust)
-  // Look at Image 1: on the left and right of the hair, loose stars drift outward into the space
-  const haloPointsCount = 1000;
+  // 3. Cosmic Nebula Halo & Floating Stars (Carefully bounded, NEVER clamped to borders)
+  const haloPointsCount = 700;
   for (let i = 0; i < haloPointsCount; i++) {
-    // Generate loose stars around the upper torso and head contour (concentrated on left side as in Image 1)
     const angle = (Math.random() < 0.65)
-      ? Math.PI * 0.7 + (Math.random() - 0.5) * Math.PI * 0.85 // Left side cluster
-      : Math.random() * TAU; // All around
-    const dist = faceRadius * (0.85 + Math.pow(Math.random(), 0.7) * 0.55);
+      ? Math.PI * 0.7 + (Math.random() - 0.5) * Math.PI * 0.8 // Left side cluster
+      : Math.random() * TAU;
+    const dist = faceRadius * (0.88 + Math.pow(Math.random(), 0.75) * 0.45);
 
     const rawX = faceCenter.x + Math.cos(angle) * dist * 1.05;
     const rawY = faceCenter.y + Math.sin(angle) * dist * 0.95;
 
-    const normX = clamp01((rawX - bounds.left) / bounds.width);
-    const normY = clamp01((rawY - bounds.top) / bounds.height);
+    const normX = (rawX - bounds.left) / bounds.width;
+    const normY = (rawY - bounds.top) / bounds.height;
 
-    const isSparkle = Math.random() < 0.12; // High sparkle rate in halo
-    const size = isSparkle ? 2.5 + Math.random() * 2.0 : 0.9 + Math.random() * 1.4;
+    // STRICT CHECK: Discard any point outside [0.04, 0.96]!
+    // NEVER clamp, which was what created the rectangular frame artifact!
+    if (normX < 0.04 || normX > 0.96 || normY < 0.04 || normY > 0.76) {
+      continue;
+    }
+
+    const isSparkle = Math.random() < 0.09;
+    const size = isSparkle ? 0.9 + Math.random() * 0.35 : 0.55 + Math.random() * 0.4;
 
     allPoints.push({
       x: normX,
       y: normY,
       z: -0.2 - Math.random() * 0.4,
       weight: 0.8,
-      light: 0.9,
+      light: 0.85,
       size,
       phase: Math.random() * TAU,
       speed: 1.2 + Math.random() * 2.0,
-      jitterX: (Math.random() - 0.5) * 0.004,
-      jitterY: (Math.random() - 0.5) * 0.004,
+      jitterX: (Math.random() - 0.5) * 0.003,
+      jitterY: (Math.random() - 0.5) * 0.003,
       priority: 4,
       category: 'scatter',
       isSparkle,
@@ -715,8 +754,8 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
 
   return {
     points: allPoints,
-    facialFeatures: facialFeatures.length > 0 ? facialFeatures : allPoints.slice(0, 3000),
-    personOutline: personOutline.length > 0 ? personOutline : allPoints.slice(3000),
+    facialFeatures: facialFeatures.length > 0 ? facialFeatures : allPoints.slice(0, 2500),
+    personOutline: personOutline.length > 0 ? personOutline : allPoints.slice(2500),
     aspect: (bounds.width * image.naturalWidth) / (bounds.height * image.naturalHeight),
   };
 }

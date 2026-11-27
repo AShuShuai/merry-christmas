@@ -888,12 +888,12 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         ? createProjector(yaw * (1 - portraitProgress), pitch * (1 - portraitProgress), w, h, effFocal)
         : projectFrame;
       const portraitAspect = portraitTargetsRef.current?.aspect ?? portraitAspectRef.current;
-      const targetMaxH = h * 0.74;
-      const targetMaxW = w * 0.74;
+      const targetMaxH = h * 0.72;
+      const targetMaxW = w * 0.70;
       const portraitHeight = Math.min(targetMaxH, targetMaxW / portraitAspect);
       const portraitWidth = portraitHeight * portraitAspect;
       const portraitLeft = (w - portraitWidth) / 2;
-      const portraitTop = Math.max(h * 0.06, (h * 0.85 - portraitHeight) / 2);
+      const portraitTop = Math.max(h * 0.05, (h * 0.84 - portraitHeight) / 2);
       if (frameSettings.treeState !== 'formed' || !frameSettings.showStar) {
         starSequenceRef.current = 0;
       } else if (scatter < 0.06 && intro >= 0.9) {
@@ -1086,24 +1086,15 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         const glow = (0.4 + 0.35 * twinkle + 0.45 * waveTwinkle * waveTwinkle + 0.6 * spark) * heartbeat;
         const treeSize = pt.base * p.scale * (0.8 + 0.4 * twinkle + 0.3 * waveTwinkle + 0.5 * spark);
 
-        // Portrait particle size: 0.5px to 2.1px with rich highlights
-        const portraitSize = pt.portraitSize || (0.7 + pt.portraitLight * 1.1);
-        let size = treeSize * (1 - portraitProgress) + portraitSize * portraitProgress;
-        if (size < 0.5) size = 0.5;
+        // Portrait particle size: fine micro-dots (0.5px to 1.1px radius) to avoid blown-out white blobs
+        const portraitRadius = Math.max(0.5, Math.min(1.1, pt.portraitSize || 0.8));
+        const treeRadius = Math.max(0.5, treeSize * 0.5);
+        const radius = treeRadius * (1 - portraitProgress) + portraitRadius * portraitProgress;
 
         // Asynchronous glowing & twinkling
         const pSpeed = pt.portraitSpeed || 2.4;
-        const pTwinkle = 0.6 + 0.4 * Math.sin(time * pSpeed + pt.phase * 3.7);
+        const pTwinkle = 0.82 + 0.18 * Math.sin(time * pSpeed + pt.phase * 3.7);
         const pFlare = Math.pow(Math.max(0, Math.sin(time * 1.6 + pt.phase * 4.9)), 14) * 0.7;
-
-        // Brilliant, thick starlight visibility for Chiara's face (no dimming by cone depth)
-        let portraitAlphaBase = 0.88 + 0.12 * pt.portraitLight;
-        if (priority === 1) {
-          portraitAlphaBase = 1.0; // Critical eyes, nose, lips
-        } else if (priority === 4) {
-          portraitAlphaBase = 0.75;
-        }
-        const portraitVisibility = Math.min(1.0, portraitAlphaBase * (0.82 + 0.18 * pTwinkle + pFlare));
 
         const baseAlpha = Math.min(1, glow * (0.4 + 0.6 * depth) * pt.fade * (0.4 + 0.6 * intro));
 
@@ -1113,32 +1104,40 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
           const treeAlpha = baseAlpha * treeColorGlow;
           if (treeAlpha > 0.005) {
             ctx.globalAlpha = treeAlpha;
-            ctx.drawImage(originalSprite, cx - size / 2, cy - size / 2, size, size);
+            const drawSize = radius * 2;
+            ctx.drawImage(originalSprite, cx - drawSize / 2, cy - drawSize / 2, drawSize, drawSize);
           }
         }
 
-        // 2. Pure brilliant white stardust (#FFFFFF): fades out progressively during return
+        // 2. Pure brilliant white stardust (#FFFFFF): fine 0.5-1.1px dots with modulated 0.35-0.85 alpha
         if (whiteGlow > 0.005) {
+          const lum = pt.portraitLight ?? 0.7;
+          const lumAlpha = 0.35 + 0.50 * lum;
           const tempFadeMult = isTemp ? tempReturnFactor : 1.0;
-          const stardustAlpha = whiteGlow * portraitVisibility * priorityCullMult * tempFadeMult;
-          if (stardustAlpha > 0.005) {
-            ctx.globalAlpha = stardustAlpha;
+          const finalAlpha =
+            Math.min(0.85, Math.max(0.35, lumAlpha * pTwinkle)) *
+            whiteGlow *
+            priorityCullMult *
+            tempFadeMult;
 
-            // Solid crisp white core: guarantees 100% pure brilliant #FFFFFF opacity on black background (Image 1)
+          if (finalAlpha > 0.005) {
+            // Fine, crisp white micro-dot (prevents overexposure and creates clear chiaroscuro)
+            ctx.globalAlpha = finalAlpha;
             ctx.fillStyle = '#ffffff';
             ctx.beginPath();
-            ctx.arc(cx, cy, Math.max(0.65, size * 0.45), 0, TAU);
+            ctx.arc(cx, cy, radius, 0, TAU);
             ctx.fill();
 
-            // Atmospheric starlight glow halo
-            const glowSize = Math.max(3.2, size * 2.5);
-            ctx.drawImage(starlightSprite, cx - glowSize / 2, cy - glowSize / 2, glowSize, glowSize);
+            // Soft, gentle starlight aura (restrained size prevents additive blowout on skin)
+            const auraSize = radius * 2.2;
+            ctx.globalAlpha = finalAlpha * 0.35;
+            ctx.drawImage(starlightSprite, cx - auraSize / 2, cy - auraSize / 2, auraSize, auraSize);
 
-            // 4-Pointed Diamond Star Twinkle Cross for sparkle stars (Image 1)
-            if (pt.portraitIsSparkle || pFlare > 0.55) {
-              const flareLen = Math.max(3.5, size * (2.2 + 2.0 * pFlare));
-              ctx.strokeStyle = `rgba(255, 255, 255, ${Math.min(1, 0.75 + 0.25 * pFlare) * stardustAlpha})`;
-              ctx.lineWidth = 0.85;
+            // 4-Pointed Diamond Star Twinkle Cross for sparkle stars (matching Image 1)
+            if ((pt.portraitIsSparkle || pFlare > 0.65) && finalAlpha > 0.28) {
+              const flareLen = radius * (2.4 + 1.8 * pFlare);
+              ctx.strokeStyle = `rgba(255, 255, 255, ${Math.min(0.9, finalAlpha * (0.7 + 0.3 * pFlare))})`;
+              ctx.lineWidth = 0.75;
               ctx.beginPath();
               ctx.moveTo(cx - flareLen, cy);
               ctx.lineTo(cx + flareLen, cy);
@@ -1380,7 +1379,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        const size = Math.max(34, Math.min(84, w * 0.068));
+        const size = Math.max(34, Math.min(76, w * 0.065));
         let fontStr = `italic bold ${size}px "Brush Script MT", "Great Vibes", "Segoe Script", cursive`;
         if (frameSettings.greetingFont === 'serif') {
           fontStr = `italic 800 ${size}px "Playfair Display", Georgia, serif`;
@@ -1389,7 +1388,11 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         }
 
         ctx.font = fontStr;
-        const textY = Math.min(h * 0.91, portraitTop + portraitHeight + 36);
+        // Positioned cleanly below the feathered shoulders (shoulders fade out by normY = 0.78)
+        const textY =
+          hasPortrait && portraitProgress > 0.3
+            ? Math.min(h * 0.92, portraitTop + portraitHeight * 0.84 + 30)
+            : Math.min(h * 0.92, h * 0.88);
 
         const textGrad = ctx.createLinearGradient(0, textY - size / 2, 0, textY + size / 2);
         textGrad.addColorStop(0, '#ffffff');
