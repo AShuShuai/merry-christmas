@@ -104,7 +104,13 @@ export interface TreePoint {
   sy: number;
   portraitX: number;
   portraitY: number;
+  portraitZ?: number;
   portraitLight: number;
+  portraitSize?: number;
+  portraitJitterX?: number;
+  portraitJitterY?: number;
+  portraitSpeed?: number;
+  isTemporary?: boolean;
 }
 
 export interface OrbitPoint {

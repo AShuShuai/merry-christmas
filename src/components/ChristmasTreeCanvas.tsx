@@ -11,10 +11,10 @@ import {
   BurstParticle,
 } from '../types';
 import { THEMES } from '../config/themes';
-import { generateSprites } from '../engine/sprites';
+import { generateSprites, makeStarlightSprite } from '../engine/sprites';
 import { createProjector } from '../engine/projection';
 import { processPortraitImage } from '../engine/portraitProcessor';
-import type { PortraitPoint, PortraitTargets } from '../engine/portraitProcessor';
+import type { PortraitTargets } from '../engine/portraitProcessor';
 import { chimeAudio } from '../utils/audio';
 
 const TAU = Math.PI * 2;
@@ -104,45 +104,60 @@ const GIFT_MODELS = createGiftModels();
 
 type Projector = (x: number, y: number, z: number) => { x: number; y: number; z: number; scale: number };
 
-function createWeightedPicker(samples: PortraitPoint[]) {
-  const cumulativeWeights: number[] = [];
-  let totalWeight = 0;
-  for (const sample of samples) {
-    totalWeight += sample.weight;
-    cumulativeWeights.push(totalWeight);
+function assignPortraitTargets(
+  points: TreePoint[],
+  targets: PortraitTargets,
+  tempStarPointsRef?: React.MutableRefObject<TreePoint[]>
+) {
+  if (points.length === 0 || !targets.points || targets.points.length === 0) return;
+
+  const targetPoints = targets.points;
+  const primaryCount = Math.min(points.length, targetPoints.length);
+
+  for (let i = 0; i < primaryCount; i++) {
+    const pt = points[i];
+    const tgt = targetPoints[i];
+    pt.portraitX = tgt.x;
+    pt.portraitY = tgt.y;
+    pt.portraitZ = tgt.z;
+    pt.portraitLight = tgt.light;
+    pt.portraitSize = tgt.size;
+    pt.portraitJitterX = tgt.jitterX;
+    pt.portraitJitterY = tgt.jitterY;
+    pt.portraitSpeed = tgt.speed;
   }
 
-  return () => {
-    const selection = Math.random() * totalWeight;
-    let low = 0;
-    let high = cumulativeWeights.length - 1;
-    while (low < high) {
-      const middle = Math.floor((low + high) / 2);
-      if (selection <= cumulativeWeights[middle]) high = middle;
-      else low = middle + 1;
+  // If portrait targets has more points (e.g. 8,000 points total),
+  // dynamically allocate temporary star particles that fade in during expansion!
+  if (tempStarPointsRef) {
+    const extraPoints: TreePoint[] = [];
+    for (let i = primaryCount; i < targetPoints.length; i++) {
+      const tgt = targetPoints[i];
+      extraPoints.push({
+        x: 0,
+        y: 0,
+        z: 0,
+        t: Math.random(),
+        c: 0,
+        originalColor: [255, 255, 255],
+        base: tgt.size,
+        phase: tgt.phase,
+        fade: 1,
+        sx: 0,
+        sy: 0,
+        portraitX: tgt.x,
+        portraitY: tgt.y,
+        portraitZ: tgt.z,
+        portraitLight: tgt.light,
+        portraitSize: tgt.size,
+        portraitJitterX: tgt.jitterX,
+        portraitJitterY: tgt.jitterY,
+        portraitSpeed: tgt.speed,
+        isTemporary: true,
+      });
     }
-    return samples[low];
-  };
-}
-
-function assignPortraitTargets(points: TreePoint[], targets: PortraitTargets) {
-  if (points.length === 0) return;
-
-  const pickFace = createWeightedPicker(targets.facialFeatures);
-  const pickOutline = createWeightedPicker(targets.personOutline);
-  const faceCount = Math.round(points.length * 0.65);
-  const useFace = Array.from({ length: points.length }, (_, index) => index < faceCount);
-  for (let index = useFace.length - 1; index > 0; index--) {
-    const swapIndex = Math.floor(Math.random() * (index + 1));
-    [useFace[index], useFace[swapIndex]] = [useFace[swapIndex], useFace[index]];
+    tempStarPointsRef.current = extraPoints;
   }
-
-  points.forEach((point, index) => {
-    const sample = useFace[index] ? pickFace() : pickOutline();
-    point.portraitX = sample.x;
-    point.portraitY = sample.y;
-    point.portraitLight = sample.light;
-  });
 }
 
 function drawGiftModels(
@@ -476,6 +491,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
 
   // Scene points refs
   const treePointsRef = useRef<TreePoint[]>([]);
+  const tempStarPointsRef = useRef<TreePoint[]>([]);
   const portraitTargetsRef = useRef<PortraitTargets | null>(null);
   const portraitAspectRef = useRef(1);
   const portraitRequestRef = useRef(0);
@@ -485,6 +501,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
   const meteorsRef = useRef<Meteor[]>([]);
   const burstsRef = useRef<BurstParticle[]>([]);
   const spritesRef = useRef<HTMLCanvasElement[]>([]);
+  const starlightSpriteRef = useRef<HTMLCanvasElement | null>(null);
 
   // Time & Intro tracking
   const startTimeRef = useRef<number>(0);
@@ -564,7 +581,9 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         portraitLight: 0,
       });
     }
-    if (portraitTargetsRef.current) assignPortraitTargets(pts, portraitTargetsRef.current);
+    if (portraitTargetsRef.current) {
+      assignPortraitTargets(pts, portraitTargetsRef.current, tempStarPointsRef);
+    }
     treePointsRef.current = pts;
 
     // 2. Orbiting Points (Fairy dust)
@@ -662,6 +681,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
       ...currentTheme.palette,
       ...(currentTheme.treePalette || []),
     ]);
+    starlightSpriteRef.current = makeStarlightSprite(64);
   }, [currentTheme]);
 
   useEffect(() => {
@@ -697,7 +717,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
           if (portraitRequestRef.current !== requestId) return;
           portraitTargetsRef.current = targets;
           portraitAspectRef.current = targets.aspect;
-          assignPortraitTargets(treePointsRef.current, targets);
+          assignPortraitTargets(treePointsRef.current, targets, tempStarPointsRef);
           onPortraitStatusUpdate?.('ready');
         })
         .catch((error: unknown) => {
@@ -970,22 +990,37 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         ctx.restore();
       }
 
-      // 5. Tree Points
+      // 5. Tree Points & Volumetric Stardust Cloud (up to 8,000 particles)
       ctx.globalCompositeOperation = 'lighter';
       const pts = treePointsRef.current;
+      const tempPts = tempStarPointsRef.current;
       const breathe = frameSettings.breatheEffect ? 1 + 0.07 * Math.sin(time * 0.9) : 1;
       const heartbeat = frameSettings.breatheEffect ? 0.9 + 0.1 * Math.pow(Math.max(0, Math.sin(time * 1.8)), 6) : 1;
+      const starlightSprite = starlightSpriteRef.current || sprites[0];
 
-      for (let i = 0; i < pts.length; i++) {
-        const pt = pts[i];
+      const renderParticle = (pt: TreePoint, isTemp: boolean) => {
         const p = particleProjectFrame(pt.x * breathe, pt.y, pt.z * breathe);
         const px = w / 2 + (p.x - w / 2) * intro;
         const py = h / 2 + (p.y - h / 2) * intro;
         let cx = pt.sx + (px - pt.sx) * intro;
         let cy = pt.sy + (py - pt.sy) * intro;
+
         if (hasPortrait) {
-          const targetX = portraitLeft + pt.portraitX * portraitWidth;
-          const targetY = portraitTop + pt.portraitY * portraitHeight;
+          // 3D Volumetric depth parallax (subtle shift with camera rotation)
+          const pZ = pt.portraitZ || 0;
+          const volOffsetX = Math.sin(yaw * 0.55) * pZ * portraitWidth * 0.04;
+          const volOffsetY = -Math.sin(pitch * 0.55) * pZ * portraitHeight * 0.04;
+
+          // Gentle floating wave-like animation and organic sub-pixel jitter
+          const wave = Math.sin(time * 1.3 + pt.phase + pt.portraitY * 5.5) * 1.1;
+          const floatX = Math.cos(time * 1.05 + pt.phase * 1.7 + pt.portraitX * 4.2) * 0.8;
+          const floatY = Math.sin(time * 1.15 + pt.phase * 2.1 + pt.portraitY * 3.8) * 0.8;
+          const jitX = (pt.portraitJitterX || 0) * portraitWidth;
+          const jitY = (pt.portraitJitterY || 0) * portraitHeight;
+
+          const targetX = portraitLeft + pt.portraitX * portraitWidth + (volOffsetX + wave + floatX + jitX);
+          const targetY = portraitTop + pt.portraitY * portraitHeight + (volOffsetY + wave * 0.65 + floatY + jitY);
+
           cx += (targetX - cx) * portraitProgress;
           cy += (targetY - cy) * portraitProgress;
         }
@@ -1001,36 +1036,55 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         if (depth > 1) depth = 1;
 
         const twinkle = 0.5 + 0.5 * Math.sin(time * 4 + pt.phase);
-        const wave = 0.5 + 0.5 * Math.sin(time * 3.5 - pt.t * 26);
+        const waveTwinkle = 0.5 + 0.5 * Math.sin(time * 3.5 - pt.t * 26);
         const spark = Math.pow(Math.max(0, Math.sin(time * 2.2 + pt.phase * 2)), 16);
-        const glow = (0.4 + 0.35 * twinkle + 0.45 * wave * wave + 0.6 * spark) * heartbeat;
-        const treeSize = pt.base * p.scale * (0.8 + 0.4 * twinkle + 0.3 * wave + 0.5 * spark);
-        let size = treeSize * (1 - portraitProgress) + (1.2 + pt.portraitLight * 0.4) * portraitProgress;
-        if (size < 1) size = 1;
+        const glow = (0.4 + 0.35 * twinkle + 0.45 * waveTwinkle * waveTwinkle + 0.6 * spark) * heartbeat;
+        const treeSize = pt.base * p.scale * (0.8 + 0.4 * twinkle + 0.3 * waveTwinkle + 0.5 * spark);
+
+        // Portrait particle size: randomized 0.5px to 2.0px with highlight scaling
+        const portraitSize = pt.portraitSize || (0.65 + pt.portraitLight * 0.95);
+        let size = treeSize * (1 - portraitProgress) + portraitSize * portraitProgress;
+        if (size < 0.5) size = 0.5;
+
+        // Asynchronous glowing & twinkling
+        const pSpeed = pt.portraitSpeed || 2.4;
+        const pTwinkle = 0.55 + 0.45 * Math.sin(time * pSpeed + pt.phase * 3.7);
+        const pFlare = Math.pow(Math.max(0, Math.sin(time * 1.6 + pt.phase * 4.9)), 14) * 0.7;
+        const portraitVisibility = Math.min(1, (0.35 + 0.65 * pt.portraitLight) * (pTwinkle + pFlare));
 
         const baseAlpha = Math.min(1, glow * (0.4 + 0.6 * depth) * pt.fade * (0.4 + 0.6 * intro));
-        const portraitTwinkle = 0.78 + 0.22 * Math.sin(time * 8 + pt.phase * 2.7);
-        const portraitVisibility = (0.2 + 0.8 * pt.portraitLight) * portraitTwinkle;
-        const originalSprite = sprites[pt.c] || sprites[0];
-        const portraitSprite = sprites[frameTheme.palette.length - 1] || sprites[0];
-        ctx.globalAlpha = baseAlpha * (1 - portraitProgress);
-        ctx.drawImage(originalSprite, cx - size / 2, cy - size / 2, size, size);
-        if (portraitProgress > 0) {
-          const [originalR, originalG, originalB] = pt.originalColor;
-          const red = Math.round(originalR + (255 - originalR) * portraitProgress);
-          const green = Math.round(originalG + (255 - originalG) * portraitProgress);
-          const blue = Math.round(originalB + (255 - originalB) * portraitProgress);
-          ctx.globalCompositeOperation = 'lighter';
-          ctx.globalAlpha = baseAlpha * portraitProgress * portraitVisibility;
-          ctx.drawImage(portraitSprite, cx - size / 2, cy - size / 2, size, size);
-          ctx.globalCompositeOperation = 'source-over';
-          ctx.globalAlpha = baseAlpha * portraitProgress * portraitVisibility;
-          ctx.fillStyle = `rgb(${red}, ${green}, ${blue})`;
-          ctx.beginPath();
-          ctx.arc(cx, cy, Math.max(0.6, size * 0.44), 0, TAU);
-          ctx.fill();
+
+        // When formed in tree: original theme colors (greens, reds, golds)
+        // Transition: smooth-lerp the entire dense shape to glowing white (#FFFFFF) upon opening,
+        // and fade back into the rotating warm Christmas colors on close!
+        if (!isTemp) {
+          const originalSprite = sprites[pt.c] || sprites[0];
+          const treeAlpha = baseAlpha * (1 - portraitProgress);
+          if (treeAlpha > 0.005) {
+            ctx.globalAlpha = treeAlpha;
+            ctx.drawImage(originalSprite, cx - size / 2, cy - size / 2, size, size);
+          }
         }
-        ctx.globalCompositeOperation = 'lighter';
+
+        // Glowing pure white stardust stippling in portrait mode
+        if (portraitProgress > 0) {
+          const stardustAlpha = (isTemp ? 1 : baseAlpha) * portraitProgress * portraitVisibility;
+          if (stardustAlpha > 0.005) {
+            ctx.globalAlpha = stardustAlpha;
+            ctx.drawImage(starlightSprite, cx - size / 2, cy - size / 2, size, size);
+          }
+        }
+      };
+
+      for (let i = 0; i < pts.length; i++) {
+        renderParticle(pts[i], false);
+      }
+
+      // Dynamically inject temporary star particles during expansion (up to 8,000 total active particles)
+      if (portraitProgress > 0 && tempPts.length > 0) {
+        for (let i = 0; i < tempPts.length; i++) {
+          renderParticle(tempPts[i], true);
+        }
       }
 
       // Draw a dense, multicolored brown sparkle trunk, revealed from the roots upward.
