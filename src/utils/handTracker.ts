@@ -10,6 +10,10 @@ function landmarkDistance(a: HandLandmark, b: HandLandmark): number {
   return Math.hypot(a.x - b.x, a.y - b.y, (a.z ?? 0) - (b.z ?? 0));
 }
 
+function landmarkDistance2D(a: HandLandmark, b: HandLandmark): number {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
 function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value));
 }
@@ -58,7 +62,6 @@ class HandTrackerEngine {
   private smoothedPinchDistance: number | null = null;
   private pinchLastStrictTime: number = 0;
   private pinchStartFrames: number = 0;
-  private pinchReleaseFrames: number = 0;
   private smoothDeltaX: number = 0;
   private smoothDeltaY: number = 0;
   private lastEmittedHasHand: boolean = false;
@@ -200,7 +203,6 @@ class HandTrackerEngine {
     this.smoothedPinchDistance = null;
     this.pinchLastStrictTime = 0;
     this.pinchStartFrames = 0;
-    this.pinchReleaseFrames = 0;
     this.lastVideoTime = -1;
     this.lastInferenceTime = 0;
     this.smoothDeltaX = 0;
@@ -267,7 +269,6 @@ class HandTrackerEngine {
       this.smoothedPinchDistance = null;
       this.pinchLastStrictTime = 0;
       this.pinchStartFrames = 0;
-      this.pinchReleaseFrames = 0;
       this.smoothDeltaX = 0;
       this.smoothDeltaY = 0;
       this.lastEmittedHasHand = false;
@@ -345,15 +346,20 @@ class HandTrackerEngine {
     this.lastHandX = currentHandX;
     this.lastHandY = currentHandY;
 
-    // Normalize fingertip distance by palm length so pinch thresholds adapt to hand size.
-    const palmLength = landmarkDistance(wrist, landmarks[9]);
-    const rawNormalizedPinchDistance =
-      landmarkDistance(thumb, indexTip) / Math.max(palmLength, 0.001);
+    // Use reliable 2D fingertip distance normalized by 2D palm scale (avoids noisy MediaPipe Z depth error!)
+    const palmLength2D = Math.max(
+      landmarkDistance2D(wrist, landmarks[9]),
+      landmarkDistance2D(landmarks[5], landmarks[17]) * 1.15,
+      0.001
+    );
+    const rawNormalizedPinchDistance = landmarkDistance2D(thumb, indexTip) / palmLength2D;
+    // Responsive smoothing (0.78 weight to latest frame so quick natural pinches register immediately!)
     this.smoothedPinchDistance = this.smoothedPinchDistance === null
       ? rawNormalizedPinchDistance
       : this.smoothedPinchDistance +
-        (rawNormalizedPinchDistance - this.smoothedPinchDistance) * 0.65;
+        (rawNormalizedPinchDistance - this.smoothedPinchDistance) * 0.78;
     const normalizedPinchDistance = this.smoothedPinchDistance;
+
     const extensions = [
       fingerExtension(wrist, landmarks[5], landmarks[6], indexTip),
       fingerExtension(wrist, landmarks[9], landmarks[10], middleTip),
@@ -361,41 +367,42 @@ class HandTrackerEngine {
       fingerExtension(wrist, landmarks[17], landmarks[18], pinkyTip),
     ];
     const otherFingersAverage = (extensions[1] + extensions[2] + extensions[3]) / 3;
-    const fingersClosed = extensions.every((extension) => extension < 0.36);
-    const otherFingersCurled = otherFingersAverage < 0.34;
-    const pinchCandidate =
-      normalizedPinchDistance < 0.46 &&
-      !otherFingersCurled;
-    const isFist = fingersClosed && !pinchCandidate;
+    const indexReach = landmarkDistance2D(indexTip, wrist) / palmLength2D;
+
+    // A REAL tight fist has ALL 4 fingers tightly curled into the palm (index tip tucked close to knuckles/palm)
+    const tightFist =
+      extensions.every((ext) => ext < 0.28) &&
+      otherFingersAverage < 0.22 &&
+      indexReach < 1.18;
+
+    // A natural pinch allows relaxed/half-curled middle-ring-pinky fingers (just not a full slammed tight fist!)
+    const isTightPinch = normalizedPinchDistance < 0.39 && !tightFist;
+    const pinchCandidate = normalizedPinchDistance < 0.47 && !tightFist;
+    const isFist = tightFist && !isTightPinch;
 
     if (isFist) {
       this.isPinching = false;
       this.pinchLastStrictTime = 0;
       this.pinchStartFrames = 0;
-      this.pinchReleaseFrames = 0;
     } else if (this.isPinching) {
       const now = performance.now();
       if (pinchCandidate) this.pinchLastStrictTime = now;
+      // Clean crisp release: exits pinch immediately once fingers separate past 0.51 so repeat pinches work effortlessly!
       const remainsPinched =
-        normalizedPinchDistance < 0.60 &&
-        !otherFingersCurled &&
-        now - this.pinchLastStrictTime <= 200;
-      this.pinchReleaseFrames = remainsPinched ? 0 : this.pinchReleaseFrames + 1;
-      if (this.pinchReleaseFrames >= 2) {
+        normalizedPinchDistance < 0.51 &&
+        !tightFist &&
+        now - this.pinchLastStrictTime <= 180;
+      if (!remainsPinched) {
         this.isPinching = false;
         this.pinchLastStrictTime = 0;
-        this.pinchReleaseFrames = 0;
       }
     } else {
-      this.pinchStartFrames = pinchCandidate
-        ? this.pinchStartFrames + 1
-        : 0;
-      // Trigger pinch quickly (1 frame if tightly pinched, 2 frames if borderline)
-      if (this.pinchStartFrames >= 2 || (pinchCandidate && normalizedPinchDistance < 0.34)) {
+      this.pinchStartFrames = pinchCandidate ? this.pinchStartFrames + 1 : 0;
+      // Instant 1-frame trigger on clear pinch (< 0.39), 2-frame confirm on borderline pinch (0.39..0.47)
+      if (isTightPinch || this.pinchStartFrames >= 2) {
         this.isPinching = true;
         this.pinchLastStrictTime = performance.now();
         this.pinchStartFrames = 0;
-        this.pinchReleaseFrames = 0;
       }
     }
     const isPinching = this.isPinching;
@@ -405,7 +412,7 @@ class HandTrackerEngine {
       gesture = 'fist';
     } else if (isPinching) {
       gesture = 'pinch';
-    } else if (extensions.every((extension) => extension > 0.5)) {
+    } else if (extensions.every((extension) => extension > 0.45)) {
       gesture = 'open_palm';
     }
 
