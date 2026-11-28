@@ -63,6 +63,7 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
 }) => {
   const pinchOpenDistanceRef = useRef<number | null>(null);
   const wasPinchingRef = useRef<boolean>(false);
+  const lastPinchTriggerAtRef = useRef<number>(0);
   const photoCardElementsRef = useRef<Map<string, HTMLDivElement>>(new Map());
   const photoOrbitPositionsRef = useRef<Map<string, OrbitPosition>>(new Map());
   const photoIdsRef = useRef('');
@@ -222,9 +223,14 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
         pinchOpenDistanceRef.current - gestureState.pinchDistance >=
           Math.max(0.035, pinchOpenDistanceRef.current * 0.07));
 
-    if (closedWithMotion) {
+    const nowMs = performance.now();
+    const cooldownElapsed = nowMs - lastPinchTriggerAtRef.current >= 520;
+
+    if (closedWithMotion && cooldownElapsed) {
       pinchOpenDistanceRef.current = null;
+      lastPinchTriggerAtRef.current = nowMs;
       if (isPhotoOpen) {
+        chimeAudio.playChime(784, 0.12);
         onRequestClosePhoto();
         return;
       }
@@ -312,12 +318,11 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
             ? Math.min(1, Math.max(0.65, (proj.z + 8) / 14))
             : Math.max(0.18, (proj.z + 10) / 25);
         const isSelectedPhotoOpen = isPhotoOpen && photo.id === selectedPhotoId;
+        // Keep the slot invisible while the photo is open OR flying back into place so there's never a duplicate ghost!
         const opacity = introProgress < 1
           ? 0
           : isSelectedPhotoOpen
-            ? isPhotoClosing
-              ? depthOpacity * photoVisibility
-              : 0
+            ? 0
             : depthOpacity * photoVisibility;
 
         const isHoveredByHand = gestureState.hasHand && isUnderCursor && isFront;
@@ -352,19 +357,24 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
             }}
           >
             <div
-              className={`w-[88px] sm:w-[104px] rounded-xl border-2 p-1 bg-gradient-to-br from-amber-100 via-amber-400 to-emerald-950 shadow-[0_8px_24px_rgba(0,0,0,0.55)] transition-all duration-300 ${
+              className={`w-[100px] sm:w-[122px] rounded-2xl border p-1.5 bg-gradient-to-b from-[#1a1d27]/95 via-[#10131b]/95 to-[#0a0c12]/95 shadow-[0_12px_30px_rgba(0,0,0,0.65)] ring-1 ring-inset ring-white/10 transition-all duration-300 ${
                 isHoveredByHand
-                  ? 'border-amber-100 shadow-[0_0_24px_rgba(255,215,120,0.7)]'
-                  : 'border-amber-300/70 group-hover:border-amber-100 group-hover:shadow-[0_0_22px_rgba(255,215,120,0.55)]'
+                  ? 'border-amber-200 shadow-[0_0_28px_rgba(251,191,36,0.75)] ring-amber-200/40'
+                  : 'border-amber-200/45 group-hover:border-amber-200 group-hover:shadow-[0_0_24px_rgba(251,191,36,0.55)]'
               }`}
             >
-              <div className="relative w-full aspect-[4/3] rounded-lg overflow-hidden border border-emerald-950/70 bg-emerald-950">
+              <div className="relative w-full aspect-[4/3] rounded-[10px] overflow-hidden border border-white/10 bg-black/80">
                 <img
                   src={photo.url}
                   alt={photo.title}
                   className="w-full h-full object-cover"
                 />
               </div>
+              {photo.title && (
+                <p className="mt-1 truncate px-0.5 text-center text-[10px] font-medium tracking-wide text-amber-100/80">
+                  {photo.title}
+                </p>
+              )}
             </div>
           </div>
         );

@@ -10,76 +10,30 @@ interface Props {
   onClose: () => void;
 }
 
-type Rect = PhotoTransitionOrigin;
+const OPEN_DURATION_MS = 680;
+const CLOSE_DURATION_MS = 580;
 
-interface Pose {
-  x: number;
-  y: number;
-  z: number;
-  depth: number;
+function easeOutQuart(t: number): number {
+  return 1 - Math.pow(1 - t, 4);
 }
 
-const TRANSITION_DURATION_MS = 760;
-const CLOSE_DURATION_MS = 860;
-const LEVEL_POSE: Pose = { x: 0, y: 0, z: 0, depth: 0 };
-
-function getTargetRect(): Rect {
-  const width = Math.max(1, Math.min(420, window.innerWidth - 32));
-  const height = Math.max(1, Math.min(window.innerHeight - 32, width * 0.82));
-  const left = (window.innerWidth - width) / 2;
-  const top = (window.innerHeight - height) / 2;
-  return {
-    left,
-    top,
-    width,
-    height,
-    x: left + width / 2,
-    y: top + height / 2,
-    z: 0,
-    scale: 1,
-  };
+function easeInOutCubic(t: number): number {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 }
 
-function getOriginRect(origin?: PhotoTransitionOrigin): Rect {
-  if (!origin) return getTargetRect();
-  return {
-    ...origin,
-    left: origin.x - origin.width / 2,
-    top: origin.y - origin.height / 2,
-  };
-}
-
-function getEntryPose(origin?: PhotoTransitionOrigin): Pose {
-  const depth = Math.max(-80, Math.min(-24, -55 + (origin?.z ?? 0) * 2));
-  return { x: 12, y: -48, z: -6, depth };
-}
-
-function interpolateRect(start: Rect, end: Rect, progress: number): Rect {
-  const lerp = (from: number, to: number) => from + (to - from) * progress;
-  const left = lerp(start.left, end.left);
-  const top = lerp(start.top, end.top);
-  const width = lerp(start.width, end.width);
-  const height = lerp(start.height, end.height);
-  return {
-    left,
-    top,
-    width,
-    height,
-    x: left + width / 2,
-    y: top + height / 2,
-    z: lerp(start.z, end.z),
-    scale: lerp(start.scale, end.scale),
-  };
-}
-
-function interpolatePose(start: Pose, end: Pose, progress: number): Pose {
-  const lerp = (from: number, to: number) => from + (to - from) * progress;
-  return {
-    x: lerp(start.x, end.x),
-    y: lerp(start.y, end.y),
-    z: lerp(start.z, end.z),
-    depth: lerp(start.depth, end.depth),
-  };
+function getShowcaseDimensions(): { width: number; height: number } {
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const maxW = Math.min(640, vw - 44);
+  const maxH = Math.min(580, vh - 76);
+  // Elegant 4:3 photo viewport + sleek 56px gallery caption strip
+  let width = maxW;
+  let height = Math.round(width * 0.72 + 58);
+  if (height > maxH) {
+    height = maxH;
+    width = Math.max(240, Math.round((height - 58) / 0.72));
+  }
+  return { width: Math.max(240, width), height: Math.max(220, height) };
 }
 
 export const PhotoLightbox: React.FC<Props> = ({
@@ -91,92 +45,170 @@ export const PhotoLightbox: React.FC<Props> = ({
   onClose,
 }) => {
   const prefersReducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-  const transitionDuration = prefersReducedMotion ? 1 : TRANSITION_DURATION_MS;
+  const openDuration = prefersReducedMotion ? 1 : OPEN_DURATION_MS;
   const closeDuration = prefersReducedMotion ? 1 : CLOSE_DURATION_MS;
-  const [rect, setRect] = useState<Rect>(() => getOriginRect(origin));
-  const [pose, setPose] = useState<Pose>(() => getEntryPose(origin));
-  const [backdropOpacity, setBackdropOpacity] = useState(0);
-  const [progress, setProgress] = useState(0);
-  const [isClosing, setIsClosing] = useState(false);
+
+  const [dims, setDims] = useState<{ width: number; height: number }>(() => getShowcaseDimensions());
   const [isPresented, setIsPresented] = useState(false);
-  const rectRef = useRef(rect);
-  const poseRef = useRef(pose);
-  const animationFrameRef = useRef<number | null>(null);
+  const [isClosing, setIsClosing] = useState(false);
+
+  const backdropRef = useRef<HTMLDivElement | null>(null);
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  const sheenRef = useRef<HTMLDivElement | null>(null);
+  const captionRef = useRef<HTMLDivElement | null>(null);
+  const closeBtnRef = useRef<HTMLButtonElement | null>(null);
+
+  const animFrameRef = useRef<number | null>(null);
   const closeStartedRef = useRef(false);
   const lastCloseRequestRef = useRef(closeRequest);
+  const dimsRef = useRef(dims);
+  dimsRef.current = dims;
 
-  const runAnimation = useCallback((
-    startRect: Rect,
-    startPose: Pose,
-    closing: boolean
-  ) => {
-    if (animationFrameRef.current !== null) {
-      window.cancelAnimationFrame(animationFrameRef.current);
-    }
+  // Keep showcase dimensions responsive on window resize
+  useEffect(() => {
+    const onResize = () => setDims(getShowcaseDimensions());
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
-    const startedAt = performance.now();
-    const duration = closing ? closeDuration : transitionDuration;
-    const frame = (now: number) => {
-      const linearProgress = Math.min(1, (now - startedAt) / duration);
-      const easedProgress = linearProgress * linearProgress * (3 - 2 * linearProgress);
-      const liveOrigin = closing ? getCurrentOrigin() ?? origin : undefined;
-      const targetRect = closing
-        ? getOriginRect(liveOrigin)
-        : getTargetRect();
-      const nextRect = interpolateRect(startRect, targetRect, easedProgress);
-      const nextPose = interpolatePose(startPose, LEVEL_POSE, easedProgress);
+  const applyFrameTransform = useCallback(
+    (
+      originRect: PhotoTransitionOrigin | undefined,
+      openProgress: number,
+      arcFactor: number,
+      closing: boolean
+    ) => {
+      const card = cardRef.current;
+      const backdrop = backdropRef.current;
+      if (!card || !backdrop) return;
 
-      rectRef.current = nextRect;
-      poseRef.current = nextPose;
-      setRect(nextRect);
-      setPose(nextPose);
-      setBackdropOpacity(closing ? 1 - easedProgress : easedProgress);
-      setProgress(closing ? 1 - easedProgress : easedProgress);
+      const { width: targetW, height: targetH } = dimsRef.current;
+      const centerX = window.innerWidth / 2;
+      const centerY = window.innerHeight / 2;
 
-      if (linearProgress < 1) {
-        animationFrameRef.current = window.requestAnimationFrame(frame);
-      } else {
-        animationFrameRef.current = null;
-        if (closing) onClose();
-        else setIsPresented(true);
+      const origX = originRect ? originRect.x : centerX;
+      const origY = originRect ? originRect.y : centerY + 60;
+      const origW = originRect ? Math.max(40, originRect.width) : targetW * 0.24;
+      const startScale = Math.max(0.14, Math.min(0.65, origW / targetW));
+
+      // t = 0 at origin floating slot, t = 1 at centered showcase
+      const t = openProgress;
+      const inv = 1 - t;
+
+      const dx = (origX - centerX) * inv;
+      // Gentle cinematic upward arc as the photo flies toward / away from the viewer
+      const arcLift = -Math.sin(Math.PI * arcFactor) * (closing ? 24 : 34);
+      const dy = (origY - centerY) * inv + arcLift;
+      const scale = startScale + (1 - startScale) * t;
+
+      // Directional 3D perspective bank depending on left/right origin
+      const sideSign = origX < centerX ? 1 : -1;
+      const rotY = sideSign * (closing ? 28 : 34) * inv;
+      const rotX = (closing ? 10 : 12) * inv;
+      const rotZ = -sideSign * (closing ? 5 : 7) * inv;
+      const zDepth = (closing ? -110 : -150) * inv;
+
+      // Pure GPU-composited transform — silky 60 FPS with zero layout reflow!
+      card.style.transform = `translate3d(${dx.toFixed(2)}px, ${dy.toFixed(2)}px, ${zDepth.toFixed(
+        1
+      )}px) rotateY(${rotY.toFixed(2)}deg) rotateX(${rotX.toFixed(2)}deg) rotateZ(${rotZ.toFixed(
+        2
+      )}deg) scale(${scale.toFixed(4)})`;
+      // Keep card fully solid during flight so it docks seamlessly back into its floating slot
+      card.style.opacity = `${Math.min(1, 0.92 + t * 0.08).toFixed(3)}`;
+
+      // Subtle dynamic glow expansion as card flies closer to viewer
+      backdrop.style.opacity = `${Math.max(0, Math.min(1, t)).toFixed(3)}`;
+
+      if (captionRef.current) {
+        const capOpacity = Math.max(0, Math.min(1, (t - 0.45) / 0.55));
+        captionRef.current.style.opacity = `${capOpacity.toFixed(3)}`;
       }
-    };
+      if (closeBtnRef.current) {
+        const btnOpacity = Math.max(0, Math.min(1, (t - 0.5) / 0.5));
+        closeBtnRef.current.style.opacity = `${btnOpacity.toFixed(3)}`;
+      }
+      if (sheenRef.current && !closing) {
+        // Warm golden glass reflection sweep during fly-in
+        const sheenPos = -120 + arcFactor * 260;
+        const sheenOpacity = Math.sin(Math.PI * arcFactor) * 0.45;
+        sheenRef.current.style.transform = `translateX(${sheenPos.toFixed(1)}%) skewX(-22deg)`;
+        sheenRef.current.style.opacity = `${sheenOpacity.toFixed(3)}`;
+      } else if (sheenRef.current && closing) {
+        sheenRef.current.style.opacity = '0';
+      }
 
-    animationFrameRef.current = window.requestAnimationFrame(frame);
-  }, [closeDuration, transitionDuration, origin, getCurrentOrigin, onClose]);
+      // Ensure card stays aligned to its centered anchor size
+      if (card.style.width !== `${targetW}px`) card.style.width = `${targetW}px`;
+      if (card.style.height !== `${targetH}px`) card.style.height = `${targetH}px`;
+    },
+    []
+  );
+
+  const runAnimation = useCallback(
+    (closing: boolean) => {
+      if (animFrameRef.current !== null) {
+        window.cancelAnimationFrame(animFrameRef.current);
+      }
+
+      const startedAt = performance.now();
+      const duration = closing ? closeDuration : openDuration;
+
+      const step = (now: number) => {
+        const raw = Math.min(1, (now - startedAt) / duration);
+        if (closing) {
+          const eased = easeInOutCubic(raw);
+          const liveOrigin = getCurrentOrigin() ?? origin;
+          applyFrameTransform(liveOrigin, 1 - eased, raw, true);
+        } else {
+          const eased = easeOutQuart(raw);
+          applyFrameTransform(origin, eased, raw, false);
+        }
+
+        if (raw < 1) {
+          animFrameRef.current = window.requestAnimationFrame(step);
+        } else {
+          animFrameRef.current = null;
+          if (closing) {
+            onClose();
+          } else {
+            setIsPresented(true);
+          }
+        }
+      };
+
+      animFrameRef.current = window.requestAnimationFrame(step);
+    },
+    [applyFrameTransform, closeDuration, openDuration, getCurrentOrigin, origin, onClose]
+  );
 
   useEffect(() => {
     if (!photo) return;
-    const startRect = getOriginRect(origin);
-    const startPose = getEntryPose(origin);
-    rectRef.current = startRect;
-    poseRef.current = startPose;
     closeStartedRef.current = false;
-    setRect(startRect);
-    setPose(startPose);
-    setBackdropOpacity(0);
-    setProgress(0);
     setIsClosing(false);
     setIsPresented(false);
 
-    animationFrameRef.current = window.requestAnimationFrame(() => {
-      runAnimation(startRect, startPose, false);
+    // Paint initial frame at exact origin slot before flying toward viewer
+    applyFrameTransform(origin, 0, 0, false);
+
+    animFrameRef.current = window.requestAnimationFrame(() => {
+      runAnimation(false);
     });
 
     return () => {
-      if (animationFrameRef.current !== null) {
-        window.cancelAnimationFrame(animationFrameRef.current);
-        animationFrameRef.current = null;
+      if (animFrameRef.current !== null) {
+        window.cancelAnimationFrame(animFrameRef.current);
+        animFrameRef.current = null;
       }
     };
-  }, [photo?.id, runAnimation]);
+  }, [photo?.id, origin, applyFrameTransform, runAnimation]);
 
   const handleClose = useCallback(() => {
     if (!photo || closeStartedRef.current) return;
     closeStartedRef.current = true;
     onCloseStart();
     setIsClosing(true);
-    runAnimation(rectRef.current, poseRef.current, true);
+    runAnimation(true);
   }, [photo, onCloseStart, runAnimation]);
 
   useEffect(() => {
@@ -188,44 +220,80 @@ export const PhotoLightbox: React.FC<Props> = ({
   if (!photo) return null;
 
   return (
-    <div className="fixed inset-0 z-50 pointer-events-none" style={{ perspective: '1200px' }}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none"
+      style={{ perspective: '1300px' }}
+    >
+      {/* Smooth ambient dimmed backdrop */}
       <div
+        ref={backdropRef}
         onClick={handleClose}
-        className="absolute inset-0 bg-black/80 backdrop-blur-md pointer-events-auto"
-        style={{ opacity: backdropOpacity }}
+        className="absolute inset-0 bg-[#04060c]/75 backdrop-blur-md pointer-events-auto"
+        style={{ opacity: 0, willChange: 'opacity' }}
       />
+
+      {/* Luxury Gallery Showcase Frame */}
       <div
+        ref={cardRef}
         onClick={(event) => event.stopPropagation()}
-        className="absolute z-[51] overflow-hidden border-2 border-amber-200/80 bg-gradient-to-br from-amber-200 via-emerald-800 to-red-900 shadow-[0_20px_60px_rgba(0,0,0,0.8),0_0_42px_rgba(255,195,70,0.3)]"
+        className="relative z-[51] flex flex-col overflow-hidden rounded-[22px] border border-amber-200/45 bg-gradient-to-b from-[#161922]/95 via-[#0f1219]/98 to-[#0a0c11]/98 p-3 shadow-[0_32px_95px_rgba(0,0,0,0.88),0_0_55px_rgba(251,191,36,0.22)] ring-1 ring-inset ring-white/10 pointer-events-auto"
         style={{
-          left: rect.left,
-          top: rect.top,
-          width: rect.width,
-          height: rect.height,
-          padding: `${4 + progress * 8}px`,
-          borderRadius: `${12 + progress * 16}px`,
-          transform: `translateZ(${pose.depth}px) rotateX(${pose.x}deg) rotateY(${pose.y}deg) rotateZ(${pose.z}deg)`,
+          width: `${dims.width}px`,
+          height: `${dims.height}px`,
           transformOrigin: 'center center',
-          willChange: 'left, top, width, height, transform',
-          pointerEvents: 'auto',
+          willChange: 'transform, opacity',
+          opacity: 0,
         }}
       >
-        <div className="relative h-full w-full overflow-hidden rounded-[inherit] border border-amber-100/70 bg-gradient-to-b from-[#173321] via-[#102417] to-[#1c1710]">
-          <div className="h-full w-full rounded-[inherit] border-2 border-amber-200/80 bg-gradient-to-br from-amber-100 via-amber-500 to-emerald-950 p-1 shadow-[0_8px_24px_rgba(0,0,0,0.55)]">
-            <div className="h-full w-full overflow-hidden rounded-xl border border-emerald-950 bg-emerald-950">
-              <img src={photo.url} alt={photo.title} className="h-full w-full object-cover" />
-            </div>
-          </div>
+        {/* Subtle top champagne light hairline */}
+        <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-amber-200/75 to-transparent" />
+
+        {/* Sweeping golden glass sheen during fly-in */}
+        <div
+          ref={sheenRef}
+          className="pointer-events-none absolute inset-y-0 -left-1/2 z-20 w-1/2 bg-gradient-to-r from-transparent via-amber-100/25 to-transparent"
+          style={{ opacity: 0, willChange: 'transform, opacity' }}
+        />
+
+        {/* Crisp Full-Bleed Photo Viewport */}
+        <div className="relative flex-1 w-full overflow-hidden rounded-[14px] border border-amber-100/20 bg-black/90 shadow-inner">
+          <img
+            src={photo.url}
+            alt={photo.title}
+            className="h-full w-full object-cover select-none"
+            draggable={false}
+          />
+          {/* Subtle cinema edge vignette */}
+          <div className="pointer-events-none absolute inset-0 shadow-[inset_0_0_32px_rgba(0,0,0,0.35)]" />
+
+          {/* Refined Floating Close Button */}
           <button
+            ref={closeBtnRef}
             type="button"
             onClick={handleClose}
             aria-label="Chiudi foto"
             disabled={!isPresented || isClosing}
-            className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-full border border-amber-200/80 bg-[#102417]/80 text-amber-100 shadow-lg backdrop-blur-sm transition-colors hover:bg-amber-300 hover:text-emerald-950 disabled:pointer-events-none"
-            style={{ opacity: progress }}
+            className="absolute right-3 top-3 z-30 flex h-9 w-9 items-center justify-center rounded-full border border-amber-200/50 bg-black/55 text-amber-100 shadow-lg backdrop-blur-md transition-all duration-200 hover:scale-105 hover:border-amber-200 hover:bg-amber-200 hover:text-slate-950 disabled:pointer-events-none"
+            style={{ opacity: 0 }}
           >
-            <span aria-hidden="true" className="text-xl leading-none">×</span>
+            <span aria-hidden="true" className="text-xl leading-none font-light">×</span>
           </button>
+        </div>
+
+        {/* Sleek Gallery Caption Strip */}
+        <div
+          ref={captionRef}
+          className="flex items-center justify-between gap-3 px-2 pt-2.5 pb-0.5"
+          style={{ opacity: 0 }}
+        >
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm sm:text-base font-medium tracking-wide text-amber-50/95">
+              {photo.title || 'Ricordo di Natale'}
+            </p>
+          </div>
+          <span className="shrink-0 rounded-full border border-amber-200/25 bg-amber-200/10 px-2.5 py-0.5 text-[11px] font-medium text-amber-200/85">
+            🤏 Pizzica per chiudere
+          </span>
         </div>
       </div>
     </div>

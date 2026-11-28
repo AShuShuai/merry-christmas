@@ -332,12 +332,12 @@ class HandTrackerEngine {
     if (this.lastHandX !== null && this.lastHandY !== null) {
       const rawDeltaX = currentHandX - this.lastHandX;
       const rawDeltaY = currentHandY - this.lastHandY;
-      const filteredDeltaX = Math.abs(rawDeltaX) < 0.0025 ? 0 : rawDeltaX;
-      const filteredDeltaY = Math.abs(rawDeltaY) < 0.0025 ? 0 : rawDeltaY;
-      this.smoothDeltaX = this.smoothDeltaX * 0.35 + filteredDeltaX * 0.65;
-      this.smoothDeltaY = this.smoothDeltaY * 0.35 + filteredDeltaY * 0.65;
-      this.smoothDeltaX = Math.max(-0.025, Math.min(0.025, this.smoothDeltaX));
-      this.smoothDeltaY = Math.max(-0.025, Math.min(0.025, this.smoothDeltaY));
+      const filteredDeltaX = Math.abs(rawDeltaX) < 0.0038 ? 0 : rawDeltaX;
+      const filteredDeltaY = Math.abs(rawDeltaY) < 0.0038 ? 0 : rawDeltaY;
+      this.smoothDeltaX = this.smoothDeltaX * 0.5 + filteredDeltaX * 0.5;
+      this.smoothDeltaY = this.smoothDeltaY * 0.5 + filteredDeltaY * 0.5;
+      this.smoothDeltaX = Math.max(-0.017, Math.min(0.017, this.smoothDeltaX));
+      this.smoothDeltaY = Math.max(-0.017, Math.min(0.017, this.smoothDeltaY));
       deltaX = this.smoothDeltaX;
       deltaY = this.smoothDeltaY;
     }

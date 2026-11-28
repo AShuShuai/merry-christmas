@@ -457,9 +457,9 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
     };
   }
 
-  // Face-aware Auto-Levels Histogram + Unsharp Mask Sharpening:
-  // Ensures warm/olive skin & bright eye sclera pop clearly while pupils, lashes, nostrils & mouth seam stay pitch black!
-  const isFaceZone = new Uint8Array(imageWidth * imageHeight);
+  // Face-aware Auto-Levels Histogram + Smooth Radial Unsharp Mask Sharpening:
+  // Uses a smooth radial falloff around the face (ZERO hard rectangle seams!) so warm skin & bright eye sclera
+  // pop clearly while pupils, lashes, eyebrows, nostrils, mouth seam & dark hair stay rich and seamless!
   const faceHist = new Uint32Array(256);
   let faceHistTotal = 0;
 
@@ -474,9 +474,6 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
         rawX <= faceBoundsBox.right &&
         rawY >= faceBoundsBox.top &&
         rawY <= faceBoundsBox.bottom;
-      if (inFace) {
-        isFaceZone[idx] = 1;
-      }
       if (inFace || isSkin[idx]) {
         const bin = Math.max(0, Math.min(255, Math.round(luminance[idx] * 255)));
         faceHist[bin]++;
@@ -511,7 +508,7 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
     }
   }
 
-  // Build normalized luminance & 3x3 unsharp mask so eyes, eyebrows, nose & lips are razor sharp
+  // Build normalized luminance & smooth radially-weighted 3x3 unsharp mask
   const normLumArr = new Float32Array(imageWidth * imageHeight);
   const sharpLum = new Float32Array(imageWidth * imageHeight);
   const lumSpan = Math.max(0.2, pHigh - pLow);
@@ -520,8 +517,6 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
     if (isCutoutBg[i]) continue;
     const rawL = luminance[i];
     const stretched = clamp01((rawL - pLow) / lumSpan);
-    // Keep very dark features (pupils, eyelashes, nostrils, mouth seam) genuinely dark (0),
-    // while lifting midtones/highlights (sclera, cheeks, forehead, nose bridge, lips) clearly!
     if (stretched < 0.13) {
       normLumArr[i] = 0;
     } else {
@@ -529,10 +524,15 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
     }
   }
 
+  const faceSigmaSq = Math.max(0.008, faceRadius * faceRadius * 0.55);
   for (let y = marginY + 1; y < imageHeight - marginY - 1; y++) {
+    const rawY = y / (imageHeight - 1);
+    const dy = rawY - faceCenter.y;
     for (let x = marginX + 1; x < imageWidth - marginX - 1; x++) {
       const idx = y * imageWidth + x;
       if (isCutoutBg[idx]) continue;
+      const rawX = x / (imageWidth - 1);
+      const dx = rawX - faceCenter.x;
       const center = normLumArr[idx];
       const avg =
         (normLumArr[(y - 1) * imageWidth + x - 1] +
@@ -545,8 +545,9 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
           normLumArr[(y + 1) * imageWidth + x] +
           normLumArr[(y + 1) * imageWidth + x + 1]) /
         9;
-      // Stronger local sharpening inside the face oval
-      const amount = isFaceZone[idx] ? 0.78 : 0.4;
+      // Smooth radial Gaussian boost around face (zero hard rectangle borders!)
+      const faceWeight = Math.exp(-(dx * dx + dy * dy) / (2 * faceSigmaSq));
+      const amount = 0.35 + 0.45 * faceWeight;
       sharpLum[idx] = clamp01(center + (center - avg) * amount);
     }
   }
@@ -828,21 +829,18 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
       if (isCutoutBg[idx]) continue; // Zero density on cutout white background
 
       const sLum = sharpLum[idx];
-      const skinOrFace = isSkin[idx] || isFaceZone[idx];
+      const skinPixel = isSkin[idx];
 
-      // STRICT HIGH-CONTRAST CHIAROSCURO:
-      // Dark areas (pupils, nostrils, lip seam, dark hair shadows) receive ZERO density!
+      // STRICT HIGH-CONTRAST CHIAROSCURO (continuous, no hard rectangular zone!)
       let localDensity = 0;
-      if (skinOrFace) {
-        if (sLum > 0.10) {
-          localDensity = 4.5 * Math.pow(sLum, 1.25) * fade;
-        }
+      if (sLum > 0.10) {
+        localDensity = (skinPixel ? 4.5 : 3.2) * Math.pow(sLum, 1.25) * fade;
       } else {
         const lum = luminance[idx];
         const edge = edges[idx];
-        if (lum > 0.16 || edge > 0.18) {
-          const hairSheen = clamp01((lum - 0.14) / 0.72);
-          localDensity = 1.5 * (0.65 * hairSheen + 0.55 * edge) * fade;
+        if (!skinPixel && (lum > 0.15 || edge > 0.18)) {
+          const hairSheen = clamp01((lum - 0.12) / 0.72);
+          localDensity = 1.3 * (0.55 * hairSheen + 0.6 * edge) * fade;
         }
       }
 
@@ -1023,16 +1021,14 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
         const idx = py * imageWidth + px;
         if (isCutoutBg[idx]) continue;
 
-        const isFaceOrSkin = isFaceZone[idx] === 1 || isSkin[idx] === 1;
+        const val = sharpLum[idx];
         const edge = edges[idx];
 
-        if (isFaceOrSkin) {
-          const val = sharpLum[idx];
-          // Keep dark features (pupils, eyelashes, eyebrows, nostrils, lip crease) genuinely dark/empty!
-          if (val < 0.07) continue;
-
+        // SEAMLESS UNIFIED STIPPLING (ZERO hard rectangle mask!):
+        // Lit face/eye sclera/skin/neck/shoulders/bright hair strands all share one continuous luminance scale!
+        if (val >= 0.065) {
           // Probabilistic fill for dark midtones, 100% fill for lit skin/sclera highlights
-          if (val < 0.35 && Math.random() > val * 2.6) continue;
+          if (val < 0.34 && Math.random() > val * 2.7) continue;
 
           const alpha = Math.min(0.96, (0.20 + 0.80 * Math.pow(val, 0.9)) * bottomFade);
           const radius = 0.55 + val * 0.72 + (Math.random() - 0.5) * 0.14;
@@ -1057,20 +1053,28 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
             sparkleCandidates.push({ x: jx, y: jy, weight: edge * bottomFade });
           }
         } else {
-          // Hair & dark outfit: deep rich silhouette studded with crisp white starlight strands & rim highlights
-          const hairSheen = clamp01((luminance[idx] - 0.05) / Math.max(0.24, pHigh - 0.05));
-          const prob = (0.11 + 0.44 * hairSheen + 0.72 * edge) * bottomFade;
-          if (Math.random() > prob) continue;
+          // Deep dark regions (dark brunette hair & deep facial shadows):
+          // Smooth radial suppression inside inner eye/nose/mouth oval so pupils, brows, nostrils & lip line stay pitch black,
+          // while hair strands & outer silhouette get organic sparkling white highlights with ZERO rectangular boundary!
+          const dxFace = (rawX - faceCenter.x) / Math.max(0.08, faceRadius * 0.52);
+          const dyFace = (rawY - faceCenter.y) / Math.max(0.08, faceRadius * 0.58);
+          const radialDist = Math.hypot(dxFace, dyFace);
+          // Smoothly ramps from 0 inside inner face features to 1 across hair & shoulders
+          const hairAllowance = clamp01((radialDist - 0.65) / 0.55);
 
-          const intensity = Math.min(1, 0.28 + 0.55 * hairSheen + 0.65 * edge);
-          const alpha = Math.min(0.96, intensity * bottomFade);
-          const radius = 0.50 + Math.random() * 0.82;
+          const hairSheen = clamp01((luminance[idx] - 0.05) / Math.max(0.24, pHigh - 0.05));
+          const prob = (0.045 + 0.28 * hairSheen + 0.68 * edge) * hairAllowance * bottomFade;
+          if (prob <= 0.005 || Math.random() > prob) continue;
+
+          const intensity = Math.min(1, 0.26 + 0.52 * hairSheen + 0.68 * edge);
+          const alpha = Math.min(0.95, intensity * bottomFade);
+          const radius = 0.50 + Math.random() * 0.78;
           rCtx.fillStyle = `rgba(255,255,255,${alpha.toFixed(3)})`;
           rCtx.beginPath();
           rCtx.arc(jx, jy, radius, 0, TAU);
           rCtx.fill();
 
-          if ((edge > 0.22 || hairSheen > 0.55) && Math.random() < 0.025) {
+          if ((edge > 0.20 || hairSheen > 0.48) && Math.random() < 0.03) {
             sparkleCandidates.push({ x: jx, y: jy, weight: (edge + hairSheen) * bottomFade });
           }
         }

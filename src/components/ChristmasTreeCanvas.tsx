@@ -910,17 +910,17 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
       let intro = Math.min(1, elapsedSinceIntro / 2.4);
       intro = 1 - Math.pow(1 - intro, 3);
 
-      // Apply AI hand gesture rotation
+      // Apply AI hand gesture rotation (calibrated for smooth, controlled turning)
       const gDx = gestureRef.current.dx;
       const gDy = gestureRef.current.dy;
       gestureRef.current = { dx: 0, dy: 0 };
       if (gDx !== 0) {
-        manualRotRef.current.yaw += gDx * 3.2;
+        manualRotRef.current.yaw += gDx * 1.85;
       }
       if (gDy !== 0) {
         manualRotRef.current.pitch = Math.max(
-          -0.45,
-          Math.min(0.45, manualRotRef.current.pitch - gDy * 2.2)
+          -0.42,
+          Math.min(0.42, manualRotRef.current.pitch - gDy * 1.2)
         );
       }
 
