@@ -890,12 +890,13 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         ? createProjector(yaw * (1 - portraitProgress), pitch * (1 - portraitProgress), w, h, effFocal)
         : projectFrame;
       const portraitAspect = portraitTargetsRef.current?.aspect ?? portraitAspectRef.current;
-      const targetMaxH = h * 0.82;
-      const targetMaxW = w * 0.86;
+      const targetMaxH = h * 0.78;
+      const targetMaxW = w * 0.84;
       const portraitHeight = Math.min(targetMaxH, targetMaxW / portraitAspect);
       const portraitWidth = portraitHeight * portraitAspect;
       const portraitLeft = (w - portraitWidth) / 2;
-      const portraitTop = Math.max(h * 0.025, (h * 0.87 - portraitHeight) / 2);
+      // Shift portrait slightly higher so shoulders fade out gently right above the "Merry Christmas" text
+      const portraitTop = Math.max(h * 0.015, (h * 0.84 - portraitHeight) / 2);
       if (frameSettings.treeState !== 'formed' || !frameSettings.showStar) {
         starSequenceRef.current = 0;
       } else if (scatter < 0.06 && intro >= 0.9) {
@@ -1081,14 +1082,12 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
           const volOffsetX = sinYawParallax * pZ;
           const volOffsetY = sinPitchParallax * pZ;
 
-          const wave = Math.sin(time * 1.3 + pt.phase + pt.portraitY * 5.5) * 1.1;
-          const floatX = Math.cos(time * 1.05 + pt.phase * 1.7 + pt.portraitX * 4.2) * 0.8;
-          const floatY = Math.sin(time * 1.15 + pt.phase * 2.1 + pt.portraitY * 3.8) * 0.8;
+          const floatOffset = Math.sin(time * 1.25 + pt.phase) * 0.7;
           const jitX = (pt.portraitJitterX || 0) * portraitWidth;
           const jitY = (pt.portraitJitterY || 0) * portraitHeight;
 
-          const targetX = portraitLeft + pt.portraitX * portraitWidth + (volOffsetX + wave + floatX + jitX);
-          const targetY = portraitTop + pt.portraitY * portraitHeight + (volOffsetY + wave * 0.65 + floatY + jitY);
+          const targetX = portraitLeft + pt.portraitX * portraitWidth + (volOffsetX + floatOffset + jitX);
+          const targetY = portraitTop + pt.portraitY * portraitHeight + (volOffsetY + floatOffset * 0.7 + jitY);
 
           if (isPurePortrait) {
             cx = targetX;
@@ -1099,7 +1098,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
           }
         }
 
-        const portraitRadius = Math.max(0.5, Math.min(1.6, pt.portraitSize || 0.85));
+        const portraitRadius = Math.max(0.55, Math.min(1.35, pt.portraitSize || 0.85));
         const treeRadius = Math.max(0.5, treeSize * 0.5);
         const radius = treeRadius * (1 - portraitProgress) + portraitRadius * portraitProgress;
 
@@ -1120,28 +1119,39 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
           }
         } else {
           const pSpeed = pt.portraitSpeed || 2.4;
-          const pTwinkle = 0.82 + 0.18 * Math.sin(time * pSpeed + pt.phase * 3.7);
-          const lum = pt.portraitLight ?? 0.75;
-          const lumAlpha = 0.52 + 0.48 * Math.pow(lum, 1.1);
-          const tempFadeMult = isTemp ? tempReturnFactor : 1.0;
+          const pTwinkle = 0.85 + 0.15 * Math.sin(time * pSpeed + pt.phase * 3.7);
           const whitePhaseFactor = Math.min(1.0, (portraitProgress - 0.45) * 2.2);
-          const finalAlpha =
-            Math.min(1.0, Math.max(0.42, lumAlpha * pTwinkle)) *
-            whitePhaseFactor *
-            priorityCullMult *
-            tempFadeMult;
+          const tempFadeMult = isTemp ? tempReturnFactor : 1.0;
+
+          let baseAlpha: number;
+          let baseRadius: number;
+
+          if (priority === 1) {
+            // 40% Feature Detail Layer: crisp, high-opacity white particles (0.6px - 1.1px, alpha 0.85 - 1.0)
+            const pLight = pt.portraitLight ?? 0.95;
+            baseAlpha = Math.min(1.0, Math.max(0.85, pLight * pTwinkle));
+            baseRadius = Math.max(0.6, Math.min(1.1, pt.portraitSize || 0.85));
+          } else {
+            // 60% Soft Shading Layer: alpha mapped to pixel brightness (0.25 - 0.70, radius 0.65 - 1.25px)
+            const pLight = pt.portraitLight ?? 0.45;
+            baseAlpha = Math.min(0.70, Math.max(0.25, pLight * pTwinkle));
+            baseRadius = Math.max(0.65, Math.min(1.25, pt.portraitSize || 0.95));
+          }
+
+          const finalAlpha = baseAlpha * whitePhaseFactor * priorityCullMult * tempFadeMult;
 
           if (finalAlpha > 0.008) {
             ctx.globalAlpha = finalAlpha;
-            const drawSize = Math.max(2.4, radius * 2.8);
+            // Compact crisp starlight radius (not oversized blobs!)
+            const drawSize = Math.max(2.0, baseRadius * 2.2);
             ctx.drawImage(starlightSprite, cx - drawSize / 2, cy - drawSize / 2, drawSize, drawSize);
 
             // Sparkling diamond star glints: pure GPU sprite blit
             if (diamondStarSprite && (pt.portraitIsSparkle || (priority === 1 && pTwinkle > 0.96))) {
               const pFlare = Math.pow(Math.max(0, Math.sin(time * 1.8 + pt.phase * 4.9)), 12);
-              if (pFlare > 0.4) {
-                const flareSize = drawSize * (1.6 + 1.0 * pFlare);
-                ctx.globalAlpha = finalAlpha * 0.85 * pFlare;
+              if (pFlare > 0.35) {
+                const flareSize = drawSize * (1.5 + 0.9 * pFlare);
+                ctx.globalAlpha = finalAlpha * 0.9 * pFlare;
                 ctx.drawImage(diamondStarSprite, cx - flareSize / 2, cy - flareSize / 2, flareSize, flareSize);
               }
             }

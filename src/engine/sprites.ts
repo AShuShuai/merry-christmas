@@ -29,9 +29,9 @@ export function makeStarlightSprite(size: number = 64): HTMLCanvasElement {
   const half = size / 2;
   const grad = g.createRadialGradient(half, half, 0, half, half, half);
   grad.addColorStop(0, 'rgba(255,255,255,1)');
-  grad.addColorStop(0.32, 'rgba(255,255,255,1)');
-  grad.addColorStop(0.58, 'rgba(255,255,255,0.72)');
-  grad.addColorStop(0.82, 'rgba(220,240,255,0.24)');
+  grad.addColorStop(0.2, 'rgba(255,255,255,0.95)');
+  grad.addColorStop(0.48, 'rgba(255,255,255,0.5)');
+  grad.addColorStop(0.78, 'rgba(225,240,255,0.18)');
   grad.addColorStop(1, 'rgba(200,225,255,0)');
 
   g.fillStyle = grad;
