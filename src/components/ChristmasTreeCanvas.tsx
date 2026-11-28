@@ -19,6 +19,105 @@ import { chimeAudio } from '../utils/audio';
 
 const TAU = Math.PI * 2;
 
+interface StarParticle3D {
+  x: number;
+  y: number;
+  z: number;
+  size: number;
+  phase: number;
+  kind: 'core' | 'rim' | 'ridge' | 'halo';
+}
+
+// Pure 3D volumetric stardust star (~165 golden-white particles) crowning the tree apex
+const STAR_PARTICLES_3D: StarParticle3D[] = (() => {
+  const list: StarParticle3D[] = [];
+  const outerR = 1.28;
+  const innerR = 0.49;
+  const peakZ = 0.42;
+
+  const verts: Array<{ x: number; y: number }> = [];
+  for (let k = 0; k < 10; k++) {
+    const r = k % 2 === 0 ? outerR : innerR;
+    const a = (k * Math.PI) / 5 + Math.PI / 2; // Point 0 straight UP in world +Y
+    verts.push({ x: Math.cos(a) * r, y: Math.sin(a) * r });
+  }
+
+  // Deterministic pseudo-random helper so star particle cloud stays clean & balanced
+  let seed = 4219;
+  const nextRand = () => {
+    seed = (seed * 16807) % 2147483647;
+    return (seed - 1) / 2147483646;
+  };
+
+  // 1. Crisp sparkling 5-point star silhouette rim (~80 particles)
+  for (let e = 0; e < 10; e++) {
+    const a = verts[e];
+    const b = verts[(e + 1) % 10];
+    const steps = 8;
+    for (let s = 0; s < steps; s++) {
+      const t = s / steps;
+      const j = 0.045;
+      list.push({
+        x: a.x + (b.x - a.x) * t + (nextRand() - 0.5) * j,
+        y: a.y + (b.y - a.y) * t + (nextRand() - 0.5) * j,
+        z: (nextRand() - 0.5) * 0.14,
+        size: s === 0 && e % 2 === 0 ? 0.48 : 0.24 + nextRand() * 0.18,
+        phase: nextRand() * TAU,
+        kind: 'rim',
+      });
+    }
+  }
+
+  // 2. Volumetric 3D pyramid ridges from front/back peaks to tips & valleys (~50 particles)
+  for (let k = 0; k < 10; k++) {
+    const v = verts[k];
+    const isTip = k % 2 === 0;
+    const count = isTip ? 6 : 3;
+    for (let s = 1; s <= count; s++) {
+      const t = s / (count + 1);
+      const side = (k + s) % 2 === 0 ? 1 : -1;
+      list.push({
+        x: v.x * t + (nextRand() - 0.5) * 0.05,
+        y: v.y * t + (nextRand() - 0.5) * 0.05,
+        z: side * peakZ * (1 - t) + (nextRand() - 0.5) * 0.06,
+        size: 0.22 + nextRand() * 0.18,
+        phase: nextRand() * TAU,
+        kind: 'ridge',
+      });
+    }
+  }
+
+  // 3. Radiant starlight core cluster (~18 particles)
+  for (let i = 0; i < 18; i++) {
+    const r = Math.pow(nextRand(), 0.7) * 0.34;
+    const ang = nextRand() * TAU;
+    list.push({
+      x: Math.cos(ang) * r,
+      y: Math.sin(ang) * r,
+      z: (nextRand() - 0.5) * 0.36,
+      size: 0.30 + nextRand() * 0.22,
+      phase: nextRand() * TAU,
+      kind: 'core',
+    });
+  }
+
+  // 4. Delicate floating stardust halo motes hovering around the star tips (~20 particles)
+  for (let i = 0; i < 20; i++) {
+    const r = outerR * (0.85 + nextRand() * 0.65);
+    const ang = nextRand() * TAU;
+    list.push({
+      x: Math.cos(ang) * r,
+      y: Math.sin(ang) * r,
+      z: (nextRand() - 0.5) * 0.55,
+      size: 0.14 + nextRand() * 0.14,
+      phase: nextRand() * TAU,
+      kind: 'halo',
+    });
+  }
+
+  return list;
+})();
+
 // Pre-rendered glossy ornament spheres (eliminates 34 createRadialGradient + shadowBlur calls per frame!)
 const ORNAMENT_SPRITES: HTMLCanvasElement[] = ['#d33139', '#f3c64e', '#e9e1c0'].map((color) => {
   const size = 36;
@@ -1837,17 +1936,13 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         ctx.restore();
       }
 
-      const starAppearDuration = 0.35;
+      const starAppearDuration = 0.42;
       const starReveal = Math.max(0, Math.min(1, (starSequenceTime - gatherDuration) / starAppearDuration));
-      if (frameSettings.showStar && frameSettings.treeState === 'formed' && starReveal > 0) {
-        const starKey = `v2:${frameTheme.id}:${Math.round(focal / 40)}`;
+      if (frameSettings.showStar && frameSettings.treeState === 'formed' && starReveal > 0 && scatter < 0.12) {
+        const starKey = `v3-particles:${frameTheme.id}:${Math.round(focal / 40)}`;
         if (starCacheRef.current.key !== starKey) {
-          const sr = focal * (frameTheme.id === 'snowglobe' ? 0.056 : 0.052);
-          const haloR = sr * 3.4;
-          const rayLen = sr * 2.9;
-          const haloPad = Math.ceil(Math.max(haloR, rayLen) + 24);
-
-          // 1. Pre-rendered Celestial Aura & Rotating Soft Rays Canvas
+          const haloR = focal * 0.125;
+          const haloPad = Math.ceil(haloR + 12);
           const haloCv = document.createElement('canvas');
           haloCv.width = haloPad * 2;
           haloCv.height = haloPad * 2;
@@ -1856,205 +1951,77 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
             hCtx.translate(haloPad, haloPad);
             const gStar = hCtx.createRadialGradient(0, 0, 0, 0, 0, haloR);
             gStar.addColorStop(0, frameTheme.star.inner);
-            gStar.addColorStop(0.16, frameTheme.star.mid);
-            gStar.addColorStop(0.45, frameTheme.star.outer);
+            gStar.addColorStop(0.22, frameTheme.star.mid);
+            gStar.addColorStop(0.55, frameTheme.star.outer);
             gStar.addColorStop(1, 'rgba(0,0,0,0)');
             hCtx.fillStyle = gStar;
             hCtx.beginPath();
             hCtx.arc(0, 0, haloR, 0, TAU);
             hCtx.fill();
-
-            // 8 delicate, wispy celestial light rays (alternating long & short)
-            for (let i = 0; i < 8; i++) {
-              hCtx.save();
-              hCtx.rotate((i * Math.PI) / 4);
-              const len = rayLen * (i % 2 === 0 ? 1.0 : 0.62);
-              const halfBase = i % 2 === 0 ? 3.2 : 2.0;
-              const lg = hCtx.createLinearGradient(0, 0, len, 0);
-              lg.addColorStop(0, 'rgba(255,252,235,0.85)');
-              lg.addColorStop(0.35, 'rgba(255,224,135,0.42)');
-              lg.addColorStop(1, 'rgba(255,210,110,0)');
-              hCtx.fillStyle = lg;
-              hCtx.beginPath();
-              hCtx.moveTo(0, -halfBase);
-              hCtx.lineTo(len, 0);
-              hCtx.lineTo(0, halfBase);
-              hCtx.closePath();
-              hCtx.fill();
-              hCtx.restore();
-            }
           }
-
-          // 2. Pre-rendered Upright 3D Faceted Golden Crystal Star Body Canvas
-          const bodyPad = Math.ceil(sr * 1.9 + 28);
-          const bodyCv = document.createElement('canvas');
-          bodyCv.width = bodyPad * 2;
-          bodyCv.height = bodyPad * 2;
-          const bCtx = bodyCv.getContext('2d');
-          if (bCtx) {
-            bCtx.translate(bodyPad, bodyPad);
-
-            // Soft golden drop glow behind the 3D star body
-            bCtx.save();
-            bCtx.shadowColor = frameTheme.star.glow;
-            bCtx.shadowBlur = 24;
-            bCtx.fillStyle = frameTheme.star.star;
-            bCtx.beginPath();
-            for (let k = 0; k < 10; k++) {
-              const r = k % 2 === 0 ? sr : sr * 0.38;
-              const a = (k * Math.PI) / 5 - Math.PI / 2;
-              if (k === 0) bCtx.moveTo(Math.cos(a) * r, Math.sin(a) * r);
-              else bCtx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
-            }
-            bCtx.closePath();
-            bCtx.fill();
-            bCtx.restore();
-
-            // Delicate miniature secondary starburst rays nestled between the 5 main arms
-            for (let i = 0; i < 5; i++) {
-              const midAngle = ((i * 2 + 1) * Math.PI) / 5 - Math.PI / 2;
-              const tipR = sr * 0.62;
-              const sideSpread = 0.14;
-              bCtx.fillStyle = 'rgba(255, 236, 175, 0.72)';
-              bCtx.beginPath();
-              bCtx.moveTo(0, 0);
-              bCtx.lineTo(Math.cos(midAngle - sideSpread) * sr * 0.24, Math.sin(midAngle - sideSpread) * sr * 0.24);
-              bCtx.lineTo(Math.cos(midAngle) * tipR, Math.sin(midAngle) * tipR);
-              bCtx.lineTo(Math.cos(midAngle + sideSpread) * sr * 0.24, Math.sin(midAngle + sideSpread) * sr * 0.24);
-              bCtx.closePath();
-              bCtx.fill();
-            }
-
-            // 10 Sculpted 3D Beveled Facets (bright champagne left facet + warm burnished gold right facet!)
-            const innerR = sr * 0.38;
-            for (let i = 0; i < 5; i++) {
-              const tipA = (i * 2 * Math.PI) / 5 - Math.PI / 2;
-              const prevValleyA = ((i * 2 - 1) * Math.PI) / 5 - Math.PI / 2;
-              const nextValleyA = ((i * 2 + 1) * Math.PI) / 5 - Math.PI / 2;
-
-              const tipX = Math.cos(tipA) * sr;
-              const tipY = Math.sin(tipA) * sr;
-              const prevX = Math.cos(prevValleyA) * innerR;
-              const prevY = Math.sin(prevValleyA) * innerR;
-              const nextX = Math.cos(nextValleyA) * innerR;
-              const nextY = Math.sin(nextValleyA) * innerR;
-
-              // Left Lit Facet (luminous ivory -> champagne gold)
-              const lightGrad = bCtx.createLinearGradient(0, 0, tipX, tipY);
-              lightGrad.addColorStop(0, '#ffffff');
-              lightGrad.addColorStop(0.45, '#fef08a');
-              lightGrad.addColorStop(1, '#f59e0b');
-              bCtx.fillStyle = lightGrad;
-              bCtx.beginPath();
-              bCtx.moveTo(0, 0);
-              bCtx.lineTo(prevX, prevY);
-              bCtx.lineTo(tipX, tipY);
-              bCtx.closePath();
-              bCtx.fill();
-
-              // Right Shaded Facet (rich burnished gold -> deep amber shadow for real 3D depth!)
-              const shadeGrad = bCtx.createLinearGradient(0, 0, tipX, tipY);
-              shadeGrad.addColorStop(0, '#fcd34d');
-              shadeGrad.addColorStop(0.55, '#d97706');
-              shadeGrad.addColorStop(1, '#92400e');
-              bCtx.fillStyle = shadeGrad;
-              bCtx.beginPath();
-              bCtx.moveTo(0, 0);
-              bCtx.lineTo(tipX, tipY);
-              bCtx.lineTo(nextX, nextY);
-              bCtx.closePath();
-              bCtx.fill();
-
-              // Razor-sharp specular metallic ridge highlight along each arm
-              bCtx.strokeStyle = 'rgba(255, 255, 245, 0.85)';
-              bCtx.lineWidth = 1.1;
-              bCtx.beginPath();
-              bCtx.moveTo(0, 0);
-              bCtx.lineTo(tipX, tipY);
-              bCtx.stroke();
-            }
-
-            // Crisp bright gold outer rim bevel
-            bCtx.strokeStyle = 'rgba(255, 248, 210, 0.75)';
-            bCtx.lineWidth = 1.1;
-            bCtx.beginPath();
-            for (let k = 0; k < 10; k++) {
-              const r = k % 2 === 0 ? sr : innerR;
-              const a = (k * Math.PI) / 5 - Math.PI / 2;
-              if (k === 0) bCtx.moveTo(Math.cos(a) * r, Math.sin(a) * r);
-              else bCtx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
-            }
-            bCtx.closePath();
-            bCtx.stroke();
-
-            // Pure white crystal core brilliance at the 3D apex
-            const coreGrad = bCtx.createRadialGradient(0, 0, 0, 0, 0, sr * 0.42);
-            coreGrad.addColorStop(0, 'rgba(255,255,255,1)');
-            coreGrad.addColorStop(0.45, 'rgba(255,250,220,0.68)');
-            coreGrad.addColorStop(1, 'rgba(255,220,130,0)');
-            bCtx.fillStyle = coreGrad;
-            bCtx.beginPath();
-            bCtx.arc(0, 0, sr * 0.42, 0, TAU);
-            bCtx.fill();
-          }
-
           starCacheRef.current = {
             key: starKey,
             haloCanvas: haloCv,
-            bodyCanvas: bodyCv,
-            radius: sr,
+            bodyCanvas: null,
+            radius: haloR,
           };
         }
 
-        const { haloCanvas, bodyCanvas, radius: starR } = starCacheRef.current;
-        if (haloCanvas && bodyCanvas) {
-          const appearScale = 0.25 + 0.75 * (1 - Math.pow(1 - starReveal, 3));
-          // Positioned cleanly crowning the apex of the pine tree
-          const pStar = projectFrame(0, 6.85, 0);
-          const breathePulse = (1 + 0.06 * Math.sin(time * 2.6)) * zoomRef.current;
-          const haloPulse = (1 + 0.14 * Math.sin(time * 2.2)) * zoomRef.current;
-          const gentleSway = Math.sin(time * 1.1) * 0.045; // noble upright sway (~2.5°), never spinning upside-down!
+        const appearScale = 0.18 + 0.82 * (1 - Math.pow(1 - starReveal, 3));
+        const starAlphaMaster = starReveal * Math.max(0, 1 - scatter / 0.12);
+        const starCenterY = 6.95;
+        const pStarCenter = projectFrame(0, starCenterY, 0);
 
-          // Pass 1: Slowly turning celestial glow & wispy rays behind the star
+        // 1. Soft warm radial stardust glow behind the 3D particle star (no hard spikes or vector lines!)
+        const { haloCanvas } = starCacheRef.current;
+        if (haloCanvas) {
+          const haloPulse = (1 + 0.12 * Math.sin(time * 2.4)) * zoomRef.current * appearScale;
           ctx.save();
           ctx.globalCompositeOperation = 'lighter';
-          ctx.globalAlpha = starReveal * (0.82 + 0.18 * Math.sin(time * 3.1));
-          ctx.translate(pStar.x, pStar.y);
-          ctx.rotate(time * 0.14);
-          ctx.scale(haloPulse * appearScale, haloPulse * appearScale);
+          ctx.globalAlpha = starAlphaMaster * 0.72;
+          ctx.translate(pStarCenter.x, pStarCenter.y);
+          ctx.scale(haloPulse, haloPulse);
           ctx.drawImage(haloCanvas, -haloCanvas.width / 2, -haloCanvas.height / 2);
           ctx.restore();
-
-          // Pass 2: Upright 3D faceted golden jewel star body
-          ctx.save();
-          ctx.globalCompositeOperation = 'source-over';
-          ctx.globalAlpha = starReveal;
-          ctx.translate(pStar.x, pStar.y);
-          ctx.rotate(gentleSway);
-          ctx.scale(breathePulse * appearScale, breathePulse * appearScale);
-          ctx.drawImage(bodyCanvas, -bodyCanvas.width / 2, -bodyCanvas.height / 2);
-
-          // Pass 3: Live twinkling diamond glints dancing on two star tips!
-          if (diamondStarSprite) {
-            ctx.globalCompositeOperation = 'lighter';
-            const glintA = Math.pow(Math.max(0, Math.sin(time * 2.4)), 6);
-            if (glintA > 0.12) {
-              const gSz = starR * (0.75 + 0.55 * glintA);
-              ctx.globalAlpha = starReveal * 0.92 * glintA;
-              ctx.drawImage(diamondStarSprite, -gSz / 2, -starR - gSz / 2, gSz, gSz);
-            }
-            const glintB = Math.pow(Math.max(0, Math.sin(time * 2.1 + 2.2)), 6);
-            if (glintB > 0.12) {
-              const rightTipA = (2 * Math.PI) / 5 - Math.PI / 2;
-              const rx = Math.cos(rightTipA) * starR;
-              const ry = Math.sin(rightTipA) * starR;
-              const gSz = starR * (0.65 + 0.45 * glintB);
-              ctx.globalAlpha = starReveal * 0.85 * glintB;
-              ctx.drawImage(diamondStarSprite, rx - gSz / 2, ry - gSz / 2, gSz, gSz);
-            }
-          }
-          ctx.restore();
         }
+
+        // 2. Pure 3D Volumetric Stardust Particle Star (rotates naturally in 3D with the tree!)
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        const goldSpr = goldSparkSpriteRef.current || sprites[0];
+        const whiteSpr = starlightSpriteRef.current || sprites[0];
+        const diamondSpr = diamondStarSpriteRef.current;
+        const starSpin = Math.sin(time * 0.55) * 0.25; // subtle graceful 3D shimmer yaw
+        const cosS = Math.cos(starSpin);
+        const sinS = Math.sin(starSpin);
+
+        for (let i = 0; i < STAR_PARTICLES_3D.length; i++) {
+          const sp = STAR_PARTICLES_3D[i];
+          const floatD = sp.kind === 'halo' ? Math.sin(time * 1.8 + sp.phase) * 0.12 : Math.sin(time * 2.6 + sp.phase) * 0.025;
+          const lx = (sp.x * cosS - sp.z * sinS) * appearScale;
+          const ly = (sp.y + floatD) * appearScale;
+          const lz = (sp.x * sinS + sp.z * cosS) * appearScale;
+
+          const proj = projectFrame(lx, starCenterY + ly, lz);
+          const tw = 0.52 + 0.48 * Math.sin(time * (sp.kind === 'core' ? 5.2 : 3.8) + sp.phase);
+          const sparkFlash = Math.pow(Math.max(0, Math.sin(time * 2.5 + sp.phase * 2.3)), 10);
+          const drawSz = Math.max(2.2, proj.scale * sp.size * (0.88 + 0.36 * tw + 0.45 * sparkFlash));
+
+          // Blend warm champagne gold on outer rim/halo and brilliant white-gold at the core & ridges
+          const useWhite = sp.kind === 'core' || (sp.kind === 'rim' && i % 3 === 0);
+          const spr = useWhite ? whiteSpr : goldSpr;
+          const baseA = sp.kind === 'halo' ? 0.42 : sp.kind === 'core' ? 0.95 : 0.82;
+          ctx.globalAlpha = Math.min(1, starAlphaMaster * baseA * (0.55 + 0.45 * tw));
+          ctx.drawImage(spr, proj.x - drawSz / 2, proj.y - drawSz / 2, drawSz, drawSz);
+
+          // Tiny crisp 4-point diamond star glints on star tips & peak flashes
+          if (diamondSpr && ((sp.kind === 'rim' && i % 8 === 0) || sparkFlash > 0.55)) {
+            const flareSz = drawSz * (1.55 + 0.9 * sparkFlash);
+            ctx.globalAlpha = Math.min(0.95, starAlphaMaster * (0.35 + 0.6 * sparkFlash));
+            ctx.drawImage(diamondSpr, proj.x - flareSz / 2, proj.y - flareSz / 2, flareSz, flareSz);
+          }
+        }
+        ctx.restore();
       }
 
       // 9. Burst Click Particles
