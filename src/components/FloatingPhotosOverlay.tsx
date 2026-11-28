@@ -385,7 +385,7 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
       (isPinching &&
         pinchOpenDistanceRef.current !== null &&
         pinchOpenDistanceRef.current - gestureState.pinchDistance >=
-          Math.max(0.035, pinchOpenDistanceRef.current * 0.07));
+        Math.max(0.035, pinchOpenDistanceRef.current * 0.07));
 
     const nowMs = performance.now();
     const cooldownElapsed = nowMs - lastPinchTriggerAtRef.current >= 420;
@@ -450,9 +450,8 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
       {/* Subtle Golden Directional Glow when holding hand in Left/Right Continuous Spin Zone */}
       {photosReady && !isPhotoOpen && frameState.activeEdgeSpinDir !== 0 && (
         <div
-          className={`pointer-events-none absolute top-1/2 -translate-y-1/2 z-30 flex items-center gap-1 rounded-full border border-amber-200/35 bg-black/45 px-3 py-1.5 text-amber-200/90 backdrop-blur-sm shadow-[0_0_24px_rgba(251,191,36,0.35)] transition-opacity duration-200 ${
-            frameState.activeEdgeSpinDir < 0 ? 'left-4' : 'right-4'
-          }`}
+          className={`pointer-events-none absolute top-1/2 -translate-y-1/2 z-30 flex items-center gap-1 rounded-full border border-amber-200/35 bg-black/45 px-3 py-1.5 text-amber-200/90 backdrop-blur-sm shadow-[0_0_24px_rgba(251,191,36,0.35)] transition-opacity duration-200 ${frameState.activeEdgeSpinDir < 0 ? 'left-4' : 'right-4'
+            }`}
         >
           <span className="text-sm font-light tracking-widest">
             {frameState.activeEdgeSpinDir < 0 ? '‹‹' : '››'}
@@ -668,11 +667,10 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
                 }}
               >
                 <div
-                  className={`relative w-[104px] sm:w-[126px] rounded-[16px] border p-2 pb-2.5 backdrop-blur-md transition-shadow duration-200 bg-gradient-to-b from-[#1a1d2a]/88 via-[#0f121b]/92 to-[#090b10]/96 ring-1 ring-inset ${
-                    isHoveredByHand
-                      ? 'border-amber-200 ring-amber-200/45 shadow-[0_18px_42px_rgba(0,0,0,0.78),0_0_32px_rgba(251,191,36,0.75)]'
-                      : 'border-amber-200/40 ring-white/10 shadow-[0_14px_34px_rgba(0,0,0,0.72),0_0_18px_rgba(251,191,36,0.16)] group-hover:border-amber-200/90 group-hover:shadow-[0_18px_40px_rgba(0,0,0,0.75),0_0_28px_rgba(251,191,36,0.55)]'
-                  }`}
+                  className={`relative w-[104px] sm:w-[126px] rounded-[16px] border p-2 pb-2.5 backdrop-blur-md transition-shadow duration-200 bg-gradient-to-b from-[#1a1d2a]/88 via-[#0f121b]/92 to-[#090b10]/96 ring-1 ring-inset ${isHoveredByHand
+                    ? 'border-amber-200 ring-amber-200/45 shadow-[0_18px_42px_rgba(0,0,0,0.78),0_0_32px_rgba(251,191,36,0.75)]'
+                    : 'border-amber-200/40 ring-white/10 shadow-[0_14px_34px_rgba(0,0,0,0.72),0_0_18px_rgba(251,191,36,0.16)] group-hover:border-amber-200/90 group-hover:shadow-[0_18px_40px_rgba(0,0,0,0.75),0_0_28px_rgba(251,191,36,0.55)]'
+                    }`}
                 >
                   {/* Top specular champagne reflection */}
                   <div className="pointer-events-none absolute inset-x-4 top-0 h-px bg-gradient-to-r from-transparent via-amber-200/75 to-transparent" />
