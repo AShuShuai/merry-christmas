@@ -548,6 +548,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
   const starlightSpriteRef = useRef<HTMLCanvasElement | null>(null);
   const goldSparkSpriteRef = useRef<HTMLCanvasElement | null>(null);
   const diamondStarSpriteRef = useRef<HTMLCanvasElement | null>(null);
+  const supernovaSpriteRef = useRef<HTMLCanvasElement | null>(null);
 
   // Time & Intro tracking
   const startTimeRef = useRef<number>(0);
@@ -731,6 +732,23 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
     starlightSpriteRef.current = makeStarlightSprite(64);
     goldSparkSpriteRef.current = makeSprite([255, 224, 132], 64);
     diamondStarSpriteRef.current = makeDiamondStarSprite(64);
+    if (!supernovaSpriteRef.current) {
+      const sCv = document.createElement('canvas');
+      sCv.width = 256;
+      sCv.height = 256;
+      const sCtx = sCv.getContext('2d');
+      if (sCtx) {
+        const g = sCtx.createRadialGradient(128, 128, 0, 128, 128, 128);
+        g.addColorStop(0, 'rgba(255,255,255,1)');
+        g.addColorStop(0.18, 'rgba(255,246,210,0.92)');
+        g.addColorStop(0.45, 'rgba(255,205,110,0.38)');
+        g.addColorStop(0.78, 'rgba(255,180,90,0.08)');
+        g.addColorStop(1, 'rgba(255,180,90,0)');
+        sCtx.fillStyle = g;
+        sCtx.fillRect(0, 0, 256, 256);
+      }
+      supernovaSpriteRef.current = sCv;
+    }
   }, [currentTheme]);
 
   useEffect(() => {
@@ -935,8 +953,8 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
 
       const hasPortrait = portraitTargetsRef.current !== null;
       const targetScatter = frameSettings.treeState === 'dispersed' && hasPortrait ? 1 : 0;
-      // Smooth, movie-paced linear progression so each particle's staggered quintic S-curve & vortex swirl shine!
-      const morphDuration = targetScatter > scatterRef.current ? 1.55 : 1.25;
+      // Epic Big Bang cinema pacing: ~1.95s opening (charge -> Big Bang -> zero-G hang -> reform), ~1.45s closing
+      const morphDuration = targetScatter > scatterRef.current ? 1.95 : 1.45;
       const maxDelta = dt / morphDuration;
       const diffScatter = targetScatter - scatterRef.current;
       if (Math.abs(diffScatter) <= maxDelta) {
@@ -1087,42 +1105,79 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
       const sinYawParallax = Math.sin(yaw * 0.55) * portraitWidth * 0.04;
       const sinPitchParallax = -Math.sin(pitch * 0.55) * portraitHeight * 0.04;
       const minDim = Math.min(w, h);
+      const maxDim = Math.max(w, h);
+      const centerX = w / 2;
+      const centerY = h * 0.45;
       const isClosing = frameSettings.treeState === 'formed' || targetScatter === 0;
       const isMorphing = hasPortrait && portraitProgress > 0.005 && portraitProgress < 0.995;
 
-      // 4a. Cinematic Magic Light Shockwave Rings during the transformation climax (zero shadowBlur!)
-      if (isMorphing && portraitProgress > 0.06 && portraitProgress < 0.92) {
-        const waveT = (portraitProgress - 0.06) / 0.86;
-        const ringAlpha = Math.sin(Math.PI * waveT) * 0.24;
-        const centerX = w / 2;
-        const centerY = h * 0.45;
-        const baseR = minDim * (0.08 + 0.46 * (1 - Math.pow(1 - waveT, 2.2)));
+      // 4a. BIG BANG SUPERNOVA FLASH & EXPANDING SHOCKWAVE RINGS (zero shadowBlur!)
+      if (isMorphing) {
+        // Core Singularity Charge & Supernova Detonation Flash (peaks right at t = 0.18!)
+        const supernovaSprite = supernovaSpriteRef.current;
+        if (supernovaSprite && portraitProgress > 0.03 && portraitProgress < 0.48) {
+          let flashIntensity = 0;
+          let flashRadius = minDim * 0.15;
+          if (portraitProgress < 0.18) {
+            // Singularity charging inward
+            const u = (portraitProgress - 0.03) / 0.15;
+            flashIntensity = u * u * 0.75;
+            flashRadius = minDim * (0.28 - 0.16 * u);
+          } else {
+            // Blazing Big Bang detonation bloom!
+            const u = (portraitProgress - 0.18) / 0.30;
+            flashIntensity = Math.pow(1 - u, 2.0) * 0.95;
+            flashRadius = minDim * (0.12 + 0.62 * (1 - Math.pow(1 - u, 2.5)));
+          }
+          if (flashIntensity > 0.01) {
+            ctx.save();
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.globalAlpha = Math.min(0.95, flashIntensity);
+            ctx.drawImage(
+              supernovaSprite,
+              centerX - flashRadius,
+              centerY - flashRadius,
+              flashRadius * 2,
+              flashRadius * 2
+            );
+            ctx.restore();
+          }
+        }
 
-        ctx.save();
-        ctx.globalCompositeOperation = 'lighter';
-        // Outer soft golden halo ring
-        ctx.strokeStyle = `rgba(255, 224, 145, ${(ringAlpha * 0.7).toFixed(3)})`;
-        ctx.lineWidth = 4.5 * (1 - waveT * 0.6);
-        ctx.beginPath();
-        ctx.arc(centerX, centerY, baseR, 0, TAU);
-        ctx.stroke();
+        // Twin Big Bang Shockwave Rings ripping outward across the screen (0.16 -> 0.72)
+        if (portraitProgress > 0.15 && portraitProgress < 0.74) {
+          const waveT = (portraitProgress - 0.15) / 0.59;
+          const ringAlpha = Math.pow(1 - waveT, 1.5) * Math.min(1, waveT * 7) * 0.42;
+          const baseR = maxDim * (0.04 + 0.64 * (1 - Math.pow(1 - waveT, 2.8)));
 
-        // Inner crisp white starlight ring
-        ctx.strokeStyle = `rgba(255, 255, 255, ${ringAlpha.toFixed(3)})`;
-        ctx.lineWidth = 1.4;
-        ctx.beginPath();
-        ctx.arc(centerX, centerY, baseR * 0.78, 0, TAU);
-        ctx.stroke();
-        ctx.restore();
+          ctx.save();
+          ctx.globalCompositeOperation = 'lighter';
+          // Outer golden shockwave rim
+          ctx.strokeStyle = `rgba(255, 224, 145, ${(ringAlpha * 0.85).toFixed(3)})`;
+          ctx.lineWidth = Math.max(1.2, 6.5 * (1 - waveT * 0.8));
+          ctx.beginPath();
+          ctx.arc(centerX, centerY, baseR, 0, TAU);
+          ctx.stroke();
+
+          // Secondary crisp white harmonic ring trailing slightly behind
+          if (waveT > 0.05) {
+            const innerR = baseR * 0.74;
+            ctx.strokeStyle = `rgba(255, 255, 255, ${(ringAlpha * 0.7).toFixed(3)})`;
+            ctx.lineWidth = Math.max(0.8, 2.4 * (1 - waveT * 0.7));
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, innerR, 0, TAU);
+            ctx.stroke();
+          }
+          ctx.restore();
+        }
       }
 
-      // 4b. Ultra-HD Pre-Rendered Stippled Stardust Portrait (crystallizes directly out of converging particles!)
+      // 4b. Ultra-HD Pre-Rendered Stippled Stardust Portrait (crystallizes out of converging Big Bang stars!)
       const renderedPortrait = portraitTargetsRef.current?.renderedCanvas;
-      if (hasPortrait && renderedPortrait && portraitProgress > 0.46) {
-        const rawReveal = Math.max(0, Math.min(1, (portraitProgress - 0.46) / 0.50));
-        // Silky crystallization ease + gentle scale settle (0.94 -> 1.0) as particles lock into her face
+      if (hasPortrait && renderedPortrait && portraitProgress > 0.62) {
+        const rawReveal = Math.max(0, Math.min(1, (portraitProgress - 0.62) / 0.36));
         const portraitCanvasAlpha = rawReveal * rawReveal * (3 - 2 * rawReveal);
-        const settleScale = 0.945 + 0.055 * portraitCanvasAlpha;
+        const settleScale = 0.955 + 0.045 * portraitCanvasAlpha;
         const drawW = portraitWidth * settleScale;
         const drawH = portraitHeight * settleScale;
         const pxOffset = sinYawParallax * 0.28 + (portraitWidth - drawW) / 2;
@@ -1138,7 +1193,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         );
       }
 
-      // 5. Unified Color-Morphing Particles with Cinematic 3D Vortex Swirl & Stardust Comet Trails
+      // 5. Unified Color-Morphing Particles — BIG BANG EXPLOSION -> ZERO-G STARFIELD -> FACE REFORMATION
       ctx.globalCompositeOperation = 'lighter';
       const pts = treePointsRef.current;
       const tempPts = tempStarPointsRef.current;
@@ -1155,8 +1210,9 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
       const gathering = (1 - intro) * minDim * 0.045;
       const hasHDPortraitBase = Boolean(renderedPortrait);
 
-      // Collect batched comet streak coordinates during flight (1 single stroke call = < 0.3ms CPU!)
-      const cometSegments: number[] = [];
+      // Batched comet trails for both outward Big Bang blast & inward reformation!
+      const blastComets: number[] = [];
+      const reformComets: number[] = [];
 
       const renderParticle = (pt: TreePoint, idx: number, isTemp: boolean) => {
         if (isTemp && isClosing && tempReturnFactor <= 0.005) {
@@ -1165,25 +1221,12 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
 
         const priority = pt.portraitPriority || 2;
 
-        // Staggered movie-style cascade wave:
-        // Opening: base & lower garlands lift off first in a swirling vortex up into Chiara's face!
-        // Closing: outer stardust & shoulders swirl back first into the spinning Christmas tree!
+        // Slight per-particle jitter so the Big Bang feels organic rather than a rigid shell
         let localP = portraitProgress;
-        let easeP = portraitProgress;
-        let midArc = 0;
-
         if (isMorphing) {
-          const stagger = isClosing
-            ? (1 - pt.t) * 0.26 + (pt.phase / TAU) * 0.12
-            : pt.t * 0.30 + (pt.phase / TAU) * 0.14;
-          const span = Math.max(0.42, 1 - stagger * 0.56);
-          const rawLocal = isClosing
-            ? (portraitProgress - (1 - span) * (1 - stagger * 0.3)) / span
-            : (portraitProgress - stagger * 0.56) / span;
-          localP = Math.max(0, Math.min(1, rawLocal));
-          // Quintic Hollywood S-curve (graceful launch -> energetic sweep -> magnetic gentle landing)
-          easeP = localP * localP * localP * (localP * (localP * 6 - 15) + 10);
-          midArc = Math.sin(Math.PI * easeP);
+          const microStagger = ((pt.phase * 0.3183) % 1) * 0.08 + pt.t * 0.04; // 0..0.12
+          const span = 1 - microStagger;
+          localP = Math.max(0, Math.min(1, (portraitProgress - microStagger * 0.5) / span));
         }
 
         let treeX = 0;
@@ -1192,9 +1235,9 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         let treeSize = 1.0;
 
         // 3D Tree Projection (completely skipped when settled in pure portrait mode!)
-        if (!isPurePortrait && easeP < 0.999) {
+        if (!isPurePortrait && localP < 0.60) {
           const p = particleProjectFrame(pt.x * breathe, pt.y, pt.z * breathe);
-          const px = w / 2 + (p.x - w / 2) * intro;
+          const px = centerX + (p.x - centerX) * intro;
           const py = h / 2 + (p.y - h / 2) * intro;
           treeX = pt.sx + (px - pt.sx) * intro;
           treeY = pt.sy + (py - pt.sy) * intro;
@@ -1214,62 +1257,104 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
 
         let cx = treeX;
         let cy = treeY;
+        let burstEnergy = 0; // peaks during the Big Bang explosion for lens bloom & golden flash
 
-        // Portrait Target Mapping + Cinematic 3D Vortex Flight Path
-        if (hasPortrait && !isPureTree && easeP > 0.001) {
+        // BIG BANG 3-ACT FLIGHT TRAJECTORY
+        if (hasPortrait && !isPureTree && localP > 0.001) {
           const pZ = pt.portraitZ || 0;
           const volOffsetX = sinYawParallax * pZ;
           const volOffsetY = sinPitchParallax * pZ;
-
           const floatOffset = Math.sin(time * 1.25 + pt.phase) * 0.7;
           const jitX = (pt.portraitJitterX || 0) * portraitWidth;
           const jitY = (pt.portraitJitterY || 0) * portraitHeight;
-
           const targetX = portraitLeft + pt.portraitX * portraitWidth + (volOffsetX + floatOffset + jitX);
           const targetY = portraitTop + pt.portraitY * portraitHeight + (volOffsetY + floatOffset * 0.7 + jitY);
 
-          if (isPurePortrait || easeP >= 0.999) {
+          if (isPurePortrait || localP >= 0.999) {
             cx = targetX;
             cy = targetY;
           } else {
-            const baseX = treeX + (targetX - treeX) * easeP;
-            const baseY = treeY + (targetY - treeY) * easeP;
+            // Deterministic 360° Big Bang destination spanning the entire viewport!
+            const burstAngle = pt.phase * 3.17 + pt.t * 19.7 + (idx % 13) * 0.48;
+            const frac = (pt.phase * 1.61803 + pt.t * 2.71828) % 1;
+            const burstDist = maxDim * (0.16 + 0.54 * Math.pow(frac, 0.68));
+            const burstX = centerX + Math.cos(burstAngle) * burstDist;
+            const burstY = centerY + Math.sin(burstAngle) * burstDist * 0.72;
 
-            // 3D Galactic Vortex Swirl: particles sweep outward along a glowing spiral ribbon mid-flight!
-            const spinDir = isClosing ? -1 : 1;
-            const swirlSpin = pt.phase * 1.6 + spinDir * easeP * 5.2;
-            const cosSwirl = Math.cos(swirlSpin);
-            const sinSwirl = Math.sin(swirlSpin);
-            const swirlAmp = midArc * minDim * (0.065 + 0.115 * pt.t);
-            const liftArc = -midArc * h * 0.042 * (0.45 + 0.55 * Math.sin(pt.phase * 2.1));
+            // Compressed singularity point right before detonation
+            const chargeX = treeX + (centerX - treeX) * 0.48;
+            const chargeY = treeY + (centerY - treeY) * 0.48;
 
-            cx = baseX + cosSwirl * swirlAmp;
-            cy = baseY + sinSwirl * swirlAmp * 0.62 + liftArc;
+            if (localP < 0.16) {
+              // ACT 1: GRAVITATIONAL IMPLOSION (tree pulls inward into glowing singularity!)
+              const u = localP / 0.16;
+              const pull = u * u * (3 - 2 * u);
+              cx = treeX + (chargeX - treeX) * pull;
+              cy = treeY + (chargeY - treeY) * pull;
+              burstEnergy = u * 0.45;
+            } else if (localP < 0.54) {
+              // ACT 2: THE BIG BANG EXPLOSION! (fast outward radial blast -> zero-gravity starfield hang!)
+              const u = (localP - 0.16) / 0.38;
+              const blast = 1 - Math.pow(1 - u, 3.4);
+              // Tiny cosmic rotation drift as particles hang at apogee
+              const drift = Math.sin(u * Math.PI) * 0.08;
+              const bx = burstX - centerX;
+              const by = burstY - centerY;
+              const rotBurstX = centerX + bx * Math.cos(drift) - by * Math.sin(drift);
+              const rotBurstY = centerY + bx * Math.sin(drift) + by * Math.cos(drift);
 
-            // Record velocity-aligned glowing stardust comet tail for ~33% of particles mid-flight
-            if (midArc > 0.14 && idx % 3 === 0) {
-              const flightDir = isClosing ? -1 : 1;
-              // Tangent combines direct flight vector + vortex orbital velocity
-              const tanX = (targetX - treeX) * 0.045 * flightDir - sinSwirl * spinDir * swirlAmp * 0.24;
-              const tanY = (targetY - treeY) * 0.045 * flightDir + cosSwirl * spinDir * swirlAmp * 0.15;
-              const tailScale = 0.55 + 0.85 * midArc;
-              cometSegments.push(cx, cy, cx - tanX * tailScale, cy - tanY * tailScale);
+              cx = chargeX + (rotBurstX - chargeX) * blast;
+              cy = chargeY + (rotBurstY - chargeY) * blast;
+
+              // Instant radial speed peaks right after detonation (u ~ 0.0 -> 0.5)
+              const radialSpeed = Math.pow(1 - u, 2.1);
+              burstEnergy = 0.25 + 0.75 * Math.sin(Math.PI * Math.min(1, u * 1.15));
+
+              // Record blazing outward Big Bang light-speed streaks!
+              if (radialSpeed > 0.12 && idx % 3 === 0) {
+                const dirX = rotBurstX - chargeX;
+                const dirY = rotBurstY - chargeY;
+                const streakLen = radialSpeed * (isClosing ? -0.14 : 0.19);
+                blastComets.push(cx, cy, cx - dirX * streakLen, cy - dirY * streakLen);
+              }
+            } else {
+              // ACT 3: MAGNETIC COSMIC REFORMATION! (vast starfield swoops inward & forms Chiara's face!)
+              const u = (localP - 0.54) / 0.46;
+              const ease = u * u * u * (u * (u * 6 - 15) + 10);
+              const midCurve = Math.sin(Math.PI * u);
+
+              // Subtle curved orbital swoop so incoming stars flow gracefully like gravity streams
+              const vx = targetX - burstX;
+              const vy = targetY - burstY;
+              const curveSign = idx % 2 === 0 ? 1 : -1;
+              const curveAmp = midCurve * 0.14 * curveSign;
+
+              cx = burstX + vx * ease - vy * curveAmp;
+              cy = burstY + vy * ease + vx * curveAmp;
+              burstEnergy = midCurve * 0.42;
+
+              // Record crisp incoming white starlight trails converging into her face!
+              const inwardSpeed = midCurve * midCurve;
+              if (inwardSpeed > 0.18 && idx % 3 === 0) {
+                const streakLen = inwardSpeed * (isClosing ? -0.11 : 0.12);
+                reformComets.push(cx, cy, cx - vx * streakLen, cy - vy * streakLen);
+              }
             }
           }
         }
 
-        // UNIFIED PARTICLE RENDERING: the exact same particle smoothly shifts color
-        // Tree Color (emerald/gold/red) -> Warm Radiant Gold Spark mid-flight -> Pure White Diamond Starlight!
+        // UNIFIED PARTICLE RENDERING: the exact same particle smoothly transforms color!
+        // Tree colors -> superheated golden supernova burst -> pure white starlight reforming into Chiara!
         const portraitRadius =
           priority === 1
             ? Math.max(0.6, Math.min(1.1, pt.portraitSize || 0.85))
             : Math.max(0.65, Math.min(1.25, pt.portraitSize || 0.95));
         const treeRadius = Math.max(0.5, treeSize * 0.5);
-        // Subtle cinematic lens bloom mid-flight (particles glow warmly as they swirl!)
-        const flightFlareBoost = 1 + 0.62 * midArc;
-        const radius = (treeRadius * (1 - easeP) + portraitRadius * easeP) * flightFlareBoost;
+        const radiusBlend = Math.max(0, Math.min(1, (localP - 0.16) / 0.72));
+        const flightFlareBoost = 1 + 0.85 * burstEnergy;
+        const radius = (treeRadius * (1 - radiusBlend) + portraitRadius * radiusBlend) * flightFlareBoost;
 
-        if (easeP <= 0.015) {
+        if (localP <= 0.01) {
           // Pure Tree state (1 draw call)
           if (!isTemp) {
             const twinkle = 0.5 + 0.5 * Math.sin(time * 4 + pt.phase);
@@ -1283,7 +1368,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
               ctx.drawImage(originalSprite, cx - drawSize / 2, cy - drawSize / 2, drawSize, drawSize);
             }
           }
-        } else if (easeP >= 0.985) {
+        } else if (localP >= 0.99) {
           // Pure Portrait state (1 draw call + occasional diamond flare)
           const pSpeed = pt.portraitSpeed || 2.4;
           const pTwinkle = 0.85 + 0.15 * Math.sin(time * pSpeed + pt.phase * 3.7);
@@ -1310,41 +1395,47 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
             }
           }
         } else {
-          // ACTIVE CINEMATIC COLOR MORPH (same particle continuously shifting color!)
+          // ACTIVE BIG BANG COLOR MORPH:
+          // Act 1 (0..0.16): Tree color charges hot into golden white
+          // Act 2 (0.16..0.54): Blazing golden-white Big Bang stardust across the entire sky!
+          // Act 3 (0.54..1.00): Pure crisp diamond white converging into Chiara's face!
           const drawSize = Math.max(2.2, radius * 2.35);
           const tempFadeMult = isTemp ? tempReturnFactor : 1.0;
 
-          // 1. Original Tree Color Sprite fades smoothly out from 0% -> 58%
-          const treeColorWeight = Math.max(0, 1 - easeP * 1.72);
+          // 1. Original Tree Color Sprite fades smoothly out during the detonation (0% -> 42%)
+          const treeColorWeight = Math.max(0, 1 - localP * 2.35);
           if (!isTemp && treeColorWeight > 0.02) {
-            ctx.globalAlpha = Math.min(1, (0.65 + 0.35 * depth) * pt.fade * treeColorWeight);
+            ctx.globalAlpha = Math.min(1, (0.7 + 0.3 * depth) * pt.fade * treeColorWeight);
             const originalSprite = sprites[pt.c] || sprites[0];
             ctx.drawImage(originalSprite, cx - drawSize / 2, cy - drawSize / 2, drawSize, drawSize);
           }
 
-          // 2. Radiant Warm Gold Spark ignites right in the vortex peak (15% -> 85%)
-          const goldWeight = midArc * 0.88 * tempFadeMult;
+          // 2. Superheated Golden Big Bang Spark peaks during charge & explosion (0.06 -> 0.65)
+          const goldWeight = Math.max(0, burstEnergy * (1 - Math.max(0, (localP - 0.52) / 0.32))) * tempFadeMult;
           if (goldWeight > 0.03) {
-            const goldSize = drawSize * (1.05 + 0.35 * midArc);
-            ctx.globalAlpha = Math.min(0.92, goldWeight);
+            const goldSize = drawSize * (1.1 + 0.45 * burstEnergy);
+            ctx.globalAlpha = Math.min(0.95, goldWeight);
             ctx.drawImage(goldSparkSprite, cx - goldSize / 2, cy - goldSize / 2, goldSize, goldSize);
           }
 
-          // 3. Pure White Diamond Starlight rises smoothly from 24% -> 100%
-          const whiteRise = Math.max(0, Math.min(1, (easeP - 0.22) / 0.72));
+          // 3. Pure White Diamond Starlight ignites at detonation (0.14 -> 1.0)
+          const whiteRise = Math.max(0, Math.min(1, (localP - 0.14) / 0.42));
           if (whiteRise > 0.02) {
             const pLight = pt.portraitLight ?? (priority === 1 ? 0.95 : 0.55);
+            const settleMult = localP > 0.72 ? (localP - 0.72) / 0.28 : 0;
             const targetAlpha =
-              (priority === 1 ? Math.max(0.8, pLight) : Math.max(0.32, pLight)) *
-              (hasHDPortraitBase ? (priority === 1 ? 0.72 : 0.56) : 1.0);
-            ctx.globalAlpha = Math.min(1, (targetAlpha + 0.35 * midArc) * whiteRise * tempFadeMult);
+              (priority === 1 ? Math.max(0.82, pLight) : Math.max(0.32, pLight)) *
+              (hasHDPortraitBase ? (priority === 1 ? 0.68 : 0.5) : 1.0);
+            // Bright sparkling starfield during Big Bang & hang, tightening smoothly to exact portrait brightness on landing
+            const flightAlpha = 0.85 * (1 - settleMult) + targetAlpha * settleMult;
+            ctx.globalAlpha = Math.min(1, flightAlpha * whiteRise * tempFadeMult);
             ctx.drawImage(starlightSprite, cx - drawSize / 2, cy - drawSize / 2, drawSize, drawSize);
           }
 
-          // 4. Cinematic Diamond Glint Flashes on leading edge of the swirling vortex!
-          if (diamondStarSprite && midArc > 0.45 && (pt.portraitIsSparkle || idx % 17 === 0)) {
-            const flareSize = drawSize * (1.75 + 1.1 * midArc);
-            ctx.globalAlpha = Math.min(0.95, midArc * 0.85 * tempFadeMult);
+          // 4. Sparkling 4-point diamond stars during the Big Bang burst & zero-G starfield!
+          if (diamondStarSprite && localP > 0.15 && localP < 0.88 && (pt.portraitIsSparkle || idx % 14 === 0)) {
+            const flareSize = drawSize * (1.8 + 1.2 * burstEnergy);
+            ctx.globalAlpha = Math.min(0.95, (0.35 + 0.65 * burstEnergy) * tempFadeMult);
             ctx.drawImage(diamondStarSprite, cx - flareSize / 2, cy - flareSize / 2, flareSize, flareSize);
           }
         }
@@ -1354,34 +1445,47 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         renderParticle(pts[i], i, false);
       }
 
-      // Temporary star particles (if any)
       if (portraitProgress > 0 && tempPts.length > 0 && (!isClosing || tempReturnFactor > 0.005)) {
         for (let i = 0; i < tempPts.length; i++) {
           renderParticle(tempPts[i], i, true);
         }
       }
 
-      // Draw ALL glowing stardust comet trails in TWO ultra-fast batched GPU path strokes!
-      if (cometSegments.length > 0) {
-        const globalMidPeak = Math.sin(Math.PI * portraitProgress);
+      // Batched GPU Stroke 1: Blazing Golden-White Outward Big Bang Streaks!
+      if (blastComets.length > 0) {
         ctx.save();
         ctx.globalCompositeOperation = 'lighter';
         ctx.lineCap = 'round';
         ctx.beginPath();
-        for (let s = 0; s < cometSegments.length; s += 4) {
-          ctx.moveTo(cometSegments[s], cometSegments[s + 1]);
-          ctx.lineTo(cometSegments[s + 2], cometSegments[s + 3]);
+        for (let s = 0; s < blastComets.length; s += 4) {
+          ctx.moveTo(blastComets[s], blastComets[s + 1]);
+          ctx.lineTo(blastComets[s + 2], blastComets[s + 3]);
         }
-        // Soft golden outer magic streak
-        ctx.globalAlpha = Math.min(0.45, 0.28 * globalMidPeak);
-        ctx.strokeStyle = '#ffd984';
-        ctx.lineWidth = 2.0;
+        ctx.globalAlpha = 0.36;
+        ctx.strokeStyle = '#ffda85';
+        ctx.lineWidth = 2.4;
         ctx.stroke();
 
-        // Crisp pure-white starlight core streak
-        ctx.globalAlpha = Math.min(0.65, 0.46 * globalMidPeak);
+        ctx.globalAlpha = 0.58;
         ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 0.85;
+        ctx.lineWidth = 1.0;
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // Batched GPU Stroke 2: Sleek White Incoming Gravity Reformation Streaks!
+      if (reformComets.length > 0) {
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        for (let s = 0; s < reformComets.length; s += 4) {
+          ctx.moveTo(reformComets[s], reformComets[s + 1]);
+          ctx.lineTo(reformComets[s + 2], reformComets[s + 3]);
+        }
+        ctx.globalAlpha = 0.38;
+        ctx.strokeStyle = '#e8f4ff';
+        ctx.lineWidth = 1.25;
         ctx.stroke();
         ctx.restore();
       }
