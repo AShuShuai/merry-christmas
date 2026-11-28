@@ -108,17 +108,23 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
 
   frameState.activeEdgeSpinDir = 0;
 
+  const isPrePinchPose =
+    gestureState.hasHand &&
+    (gestureState.isPinching ||
+      (gestureState.gesture !== 'fist' &&
+        gestureState.gesture !== 'open_palm' &&
+        gestureState.pinchDistance < 0.68));
+
   if (photosReady && !isPhotoOpen) {
-    const isSteadyAimOnCard =
-      hoveringCardRef.current &&
-      gestureState.hasHand &&
-      Math.abs(gestureState.deltaX) < 0.006;
+    // Only slow down the orbit when near a Polaroid AND in a pre-pinch / pinch pose (thumb & index closing)!
+    // When hand is OPEN (open_palm, fingers wide apart), NEVER slow down — allow full speed & edge acceleration!
+    const shouldSlowForPinch = hoveringCardRef.current && isPrePinchPose;
 
     if (gestureState.hasHand && gestureState.gesture !== 'fist' && !gestureState.isPinching) {
       const gx = gestureState.deltaX;
 
       // 1. SMART GLOBE-FLICK IMPULSE (flick right/left right in the center of the webcam without leaving FOV!)
-      if (Math.abs(gx) > 0.0055 && gx !== frameState.lastDeltaX) {
+      if (!shouldSlowForPinch && Math.abs(gx) > 0.005 && gx !== frameState.lastDeltaX) {
         const swipeDir = Math.sign(gx);
         const sinceLastFlick = now - frameState.lastFlickAt;
         // Ignore gentle return-stroke right after a strong flick so repositioning your hand never cancels spin!
@@ -129,12 +135,12 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
           Math.abs(gx) < 0.011;
 
         if (!isGentleReturnStroke) {
-          const impulse = gx * 56;
+          const impulse = gx * 60;
           frameState.spinVelocity = Math.max(
-            -4.6,
-            Math.min(4.6, frameState.spinVelocity + impulse)
+            -4.8,
+            Math.min(4.8, frameState.spinVelocity + impulse)
           );
-          if (Math.abs(gx) >= 0.0085) {
+          if (Math.abs(gx) >= 0.008) {
             frameState.lastFlickDir = swipeDir;
             frameState.lastFlickAt = now;
           }
@@ -142,19 +148,19 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
       }
       frameState.lastDeltaX = gx;
 
-      // 2. CONTINUOUS EDGE-ZONE JOYSTICK SPIN (hold hand comfortably in left/right zone to spin endlessly!)
-      // Automatically pauses when you're hovering steadily over a Polaroid so pinching is always effortless!
-      if (!isSteadyAimOnCard) {
+      // 2. CONTINUOUS EDGE-ZONE JOYSTICK SPIN:
+      // Active whenever NOT braking for a pre-pinch (so an OPEN hand ALWAYS accelerates smoothly!)
+      if (!shouldSlowForPinch) {
         const cxNorm = gestureState.cursorX;
         if (cxNorm > 0.68) {
           const strength = clamp01((cxNorm - 0.68) / 0.24);
-          const targetEdgeSpeed = 0.55 + strength * strength * 2.25;
-          frameState.spinVelocity += (targetEdgeSpeed - frameState.spinVelocity) * Math.min(1, deltaTime * 4.5);
+          const targetEdgeSpeed = 0.60 + strength * strength * 2.4;
+          frameState.spinVelocity += (targetEdgeSpeed - frameState.spinVelocity) * Math.min(1, deltaTime * 4.8);
           frameState.activeEdgeSpinDir = 1;
         } else if (cxNorm < 0.32) {
           const strength = clamp01((0.32 - cxNorm) / 0.24);
-          const targetEdgeSpeed = -(0.55 + strength * strength * 2.25);
-          frameState.spinVelocity += (targetEdgeSpeed - frameState.spinVelocity) * Math.min(1, deltaTime * 4.5);
+          const targetEdgeSpeed = -(0.60 + strength * strength * 2.4);
+          frameState.spinVelocity += (targetEdgeSpeed - frameState.spinVelocity) * Math.min(1, deltaTime * 4.8);
           frameState.activeEdgeSpinDir = -1;
         }
       }
@@ -172,12 +178,11 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
     }
     frameState.lastYaw = yaw;
 
-    // Gentle autonomous rotation slows down magnetically when hovering over a card to pinch!
-    const baseOrbitSpeed = isSteadyAimOnCard ? 0.03 : 0.20;
+    // Only slow down when actively pre-pinching near a card; open palm keeps full lively orbital speed!
+    const baseOrbitSpeed = shouldSlowForPinch ? 0.025 : 0.22;
     frameState.orbitAngle += (baseOrbitSpeed + frameState.spinVelocity) * deltaTime;
 
-    // Longer, silkier flywheel glide when flicked (or crisp brake when aiming directly at a Polaroid!)
-    const dampingRate = isSteadyAimOnCard ? 7.5 : frameState.activeEdgeSpinDir !== 0 ? 0.4 : 1.25;
+    const dampingRate = shouldSlowForPinch ? 8.0 : frameState.activeEdgeSpinDir !== 0 ? 0.35 : 1.25;
     frameState.spinVelocity *= Math.exp(-deltaTime * dampingRate);
     if (Math.abs(frameState.spinVelocity) < 0.006) frameState.spinVelocity = 0;
   } else {
@@ -450,13 +455,14 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
         </div>
       )}
 
-      {/* Borderless Luxury Glowing SVG Hand Cursor (no outer circle border!) */}
+      {/* Borderless Luxury Glowing SVG Hand Cursor (GPU translate3d for silky high-DPI tracking!) */}
       {gestureState.hasHand && (
         <div
-          className="absolute pointer-events-none -translate-x-1/2 -translate-y-1/2 z-40 transition-transform duration-150"
+          className="absolute left-0 top-0 pointer-events-none z-40"
           style={{
-            left: `${cursorScreenX}px`,
-            top: `${cursorScreenY}px`,
+            transform: `translate3d(${cursorScreenX.toFixed(1)}px, ${cursorScreenY.toFixed(1)}px, 0) translate(-50%, -50%)`,
+            transition: 'transform 52ms linear',
+            willChange: 'transform',
           }}
         >
           <div
@@ -653,14 +659,18 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
                     />
                     <div className="pointer-events-none absolute inset-0 bg-gradient-to-tr from-transparent via-white/[0.04] to-amber-100/[0.12]" />
 
-                    {/* Magnetic Hand Hover Prompt Badge */}
-                    <div
-                      className={`pointer-events-none absolute bottom-1.5 right-1.5 rounded-full border border-amber-200/70 bg-black/75 px-2 py-0.5 text-[9px] font-semibold tracking-wide text-amber-100 shadow-md backdrop-blur-sm transition-all duration-150 ${
-                        isHoveredByHand ? 'opacity-100 scale-100' : 'opacity-0 scale-90'
-                      }`}
-                    >
-                      🤏 Apri
-                    </div>
+                  {/* Magnetic Hand Hover Prompt Badge */}
+                  <div
+                    className={`pointer-events-none absolute bottom-1.5 right-1.5 rounded-full border px-2 py-0.5 text-[9px] font-semibold tracking-wide shadow-md backdrop-blur-sm transition-all duration-150 ${
+                      isHoveredByHand
+                        ? isPrePinchPose
+                          ? 'border-amber-200 bg-amber-400/25 text-amber-50 opacity-100 scale-105'
+                          : 'border-amber-200/70 bg-black/75 text-amber-100 opacity-100 scale-100'
+                        : 'border-amber-200/70 bg-black/75 text-amber-100 opacity-0 scale-90'
+                    }`}
+                  >
+                    🤏 Apri
+                  </div>
                   </div>
 
                   {/* Classic Polaroid Bottom Chin with Romantic Serif Title */}

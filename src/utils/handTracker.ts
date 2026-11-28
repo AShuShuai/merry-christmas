@@ -69,6 +69,7 @@ class HandTrackerEngine {
   private lastEmittedPinching: boolean = false;
   private lastEmittedCursorX: number = -1;
   private lastEmittedCursorY: number = -1;
+  private lastEmittedPinchDistance: number = 1;
 
   public init(
     video: HTMLVideoElement,
@@ -142,7 +143,7 @@ class HandTrackerEngine {
         video: {
           width: { ideal: 320 },
           height: { ideal: 240 },
-          frameRate: { ideal: 15, max: 20 },
+          frameRate: { ideal: 24, max: 30 },
           facingMode: 'user',
         },
       });
@@ -212,6 +213,7 @@ class HandTrackerEngine {
     this.lastEmittedPinching = false;
     this.lastEmittedCursorX = -1;
     this.lastEmittedCursorY = -1;
+    this.lastEmittedPinchDistance = 1;
     this.canvasCtx = null;
   }
 
@@ -222,8 +224,8 @@ class HandTrackerEngine {
       // Skip all webcam AI inference when browser tab is hidden
       if (!document.hidden) {
         const nowInMs = performance.now();
-        // Adaptive inference throttling: ~16 FPS when hand is active, ~8 FPS when idle
-        const minIntervalMs = this.lastEmittedHasHand ? 62 : 125;
+        // Adaptive inference throttling: ~23 FPS when hand is active (high responsiveness), ~8 FPS when idle
+        const minIntervalMs = this.lastEmittedHasHand ? 44 : 125;
         if (
           this.videoEl.readyState >= 2 &&
           this.videoEl.currentTime !== this.lastVideoTime &&
@@ -276,6 +278,7 @@ class HandTrackerEngine {
       this.lastEmittedPinching = false;
       this.lastEmittedCursorX = 0.5;
       this.lastEmittedCursorY = 0.5;
+      this.lastEmittedPinchDistance = 1;
 
       this.onGestureCallback?.({
         hasHand: false,
@@ -307,19 +310,26 @@ class HandTrackerEngine {
     const ringTip = landmarks[16];
     const pinkyTip = landmarks[20];
 
-    // Ergonomic active-zone mapping: maps comfortable central webcam zone [0.16..0.84] x [0.14..0.86]
-    // onto full [0..1] screen coordinates so user can effortlessly reach photos on both sides!
-    const rawMirrorX = 1 - (indexTip.x + thumb.x) / 2;
-    const rawMirrorY = (indexTip.y + thumb.y) / 2;
-    const rawCursorX = clamp01((rawMirrorX - 0.16) / 0.68);
-    const rawCursorY = clamp01((rawMirrorY - 0.14) / 0.72);
-    const cursorSmoothing = 0.55;
-    this.smoothCursorX = this.smoothCursorX === null
-      ? rawCursorX
-      : this.smoothCursorX + (rawCursorX - this.smoothCursorX) * cursorSmoothing;
-    this.smoothCursorY = this.smoothCursorY === null
-      ? rawCursorY
-      : this.smoothCursorY + (rawCursorY - this.smoothCursorY) * cursorSmoothing;
+    // High-DPI Ergonomic Active-Zone Mapping:
+    // Maps compact central webcam box [0.21..0.79] x [0.18..0.82] onto full [0..1] screen (+22% higher DPI!)
+    // Weighted toward index fingertip (65% index + 35% thumb) so closing thumb into a pinch doesn't pull cursor off-target!
+    const rawMirrorX = 1 - (indexTip.x * 0.65 + thumb.x * 0.35);
+    const rawMirrorY = indexTip.y * 0.65 + thumb.y * 0.35;
+    const rawCursorX = clamp01((rawMirrorX - 0.21) / 0.58);
+    const rawCursorY = clamp01((rawMirrorY - 0.18) / 0.64);
+
+    // One-Euro Style Velocity-Adaptive Filter:
+    // - Slow / aiming: low alpha (~0.26) eliminates micro-jitter for surgical pinch accuracy
+    // - Fast sweep: high alpha (~0.86) gives instant, zero-lag high-DPI tracking!
+    if (this.smoothCursorX === null || this.smoothCursorY === null) {
+      this.smoothCursorX = rawCursorX;
+      this.smoothCursorY = rawCursorY;
+    } else {
+      const moveSpeed = Math.hypot(rawCursorX - this.smoothCursorX, rawCursorY - this.smoothCursorY);
+      const adaptiveAlpha = Math.max(0.24, Math.min(0.88, 0.24 + moveSpeed * 11.5));
+      this.smoothCursorX += (rawCursorX - this.smoothCursorX) * adaptiveAlpha;
+      this.smoothCursorY += (rawCursorY - this.smoothCursorY) * adaptiveAlpha;
+    }
     const cursorX = this.smoothCursorX;
     const cursorY = this.smoothCursorY;
 
@@ -412,22 +422,27 @@ class HandTrackerEngine {
       gesture = 'fist';
     } else if (isPinching) {
       gesture = 'pinch';
-    } else if (extensions.every((extension) => extension > 0.45)) {
+    } else if (
+      extensions.every((extension) => extension > 0.45) &&
+      normalizedPinchDistance >= 0.66
+    ) {
       gesture = 'open_palm';
     }
 
     // Draw Skeleton on PIP Canvas
     this.drawSkeleton(ctx, landmarks, w, h, isPinching);
 
-    // Avoid redundant React state updates if hand hasn't moved or changed gesture
+    // Finer high-DPI emission threshold (0.0012) + react immediately to pre-pinch distance changes!
     const cursorMoved =
-      Math.abs(cursorX - this.lastEmittedCursorX) >= 0.003 ||
-      Math.abs(cursorY - this.lastEmittedCursorY) >= 0.003;
+      Math.abs(cursorX - this.lastEmittedCursorX) >= 0.0012 ||
+      Math.abs(cursorY - this.lastEmittedCursorY) >= 0.0012;
+    const pinchChanged = Math.abs(normalizedPinchDistance - this.lastEmittedPinchDistance) >= 0.03;
     const stateChanged =
       !this.lastEmittedHasHand ||
       gesture !== this.lastEmittedGesture ||
       isPinching !== this.lastEmittedPinching ||
       cursorMoved ||
+      pinchChanged ||
       deltaX !== 0 ||
       deltaY !== 0;
 
@@ -438,6 +453,7 @@ class HandTrackerEngine {
     this.lastEmittedPinching = isPinching;
     this.lastEmittedCursorX = cursorX;
     this.lastEmittedCursorY = cursorY;
+    this.lastEmittedPinchDistance = normalizedPinchDistance;
 
     // Emit state
     this.onGestureCallback?.({
