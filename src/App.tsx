@@ -182,6 +182,7 @@ export const App: React.FC = () => {
     deltaX: 0,
     deltaY: 0,
     pinchDistance: 1,
+    isPinchReady: false,
     isPinching: false,
   });
 

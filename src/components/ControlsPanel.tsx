@@ -193,9 +193,10 @@ export const ControlsPanel = React.memo<Props>(({
             className="absolute bottom-full left-0 mb-3 w-64 rounded-2xl border border-white/15 bg-[#07101c]/85 p-4 text-left text-xs text-white/80 shadow-2xl backdrop-blur-xl"
           >
             <h2 className="mb-2 font-semibold text-cyan-200">Gesti della mano</h2>
-            <p className="mb-1.5">Muovi la mano per ruotare l'albero.</p>
-            <p className="mb-1.5">Palmo aperto: trasforma l'albero nel ritratto; pugno: ricomponilo.</p>
-            <p>Pizzica con indice e pollice per aprire una foto.</p>
+            <p className="mb-1.5">Palmo aperto: trasforma l'albero e fai girare veloce le foto.</p>
+            <p className="mb-1.5">Mano a pinza (pronta) vicino a una foto: rallenta l'orbita per mirare.</p>
+            <p className="mb-1.5">Chiudi indice e pollice (pizzico): apri o richiudi la foto.</p>
+            <p>Pugno chiuso: ricomponi l'albero di Natale.</p>
           </div>
         )}
         <button

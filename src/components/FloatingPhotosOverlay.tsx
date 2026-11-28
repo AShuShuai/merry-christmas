@@ -78,7 +78,7 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
   const lastPinchTriggerAtRef = useRef<number>(0);
   const prevOpenPhotoIdRef = useRef<string | undefined>(undefined);
   const landedPhotoRef = useRef<{ id: string; landedAt: number } | null>(null);
-  const hoveringCardRef = useRef<boolean>(false);
+  const nearCardForSlowdownRef = useRef<boolean>(false);
   const photoCardElementsRef = useRef<Map<string, HTMLDivElement>>(new Map());
   const photoOrbitMetaRef = useRef<Map<string, OrbitMeta>>(new Map());
   const photoIdsRef = useRef('');
@@ -108,17 +108,13 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
 
   frameState.activeEdgeSpinDir = 0;
 
-  const isPrePinchPose =
-    gestureState.hasHand &&
-    (gestureState.isPinching ||
-      (gestureState.gesture !== 'fist' &&
-        gestureState.gesture !== 'open_palm' &&
-        gestureState.pinchDistance < 0.68));
+  const isPinchReady = gestureState.hasHand && gestureState.isPinchReady;
+  const isPinchOrReady = gestureState.hasHand && (gestureState.isPinchReady || gestureState.isPinching);
 
   if (photosReady && !isPhotoOpen) {
-    // Only slow down the orbit when near a Polaroid AND in a pre-pinch / pinch pose (thumb & index closing)!
-    // When hand is OPEN (open_palm, fingers wide apart), NEVER slow down — allow full speed & edge acceleration!
-    const shouldSlowForPinch = hoveringCardRef.current && isPrePinchPose;
+    // ONLY slow down the orbit when near a Polaroid AND shaped in a pinch-ready pose (thumb & index poised, NOT open palm)!
+    // When hand is OPEN (open_palm), NEVER slow down — keep full speed + edge acceleration + flick!
+    const shouldSlowForPinch = nearCardForSlowdownRef.current && isPinchOrReady;
 
     if (gestureState.hasHand && gestureState.gesture !== 'fist' && !gestureState.isPinching) {
       const gx = gestureState.deltaX;
@@ -149,7 +145,7 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
       frameState.lastDeltaX = gx;
 
       // 2. CONTINUOUS EDGE-ZONE JOYSTICK SPIN:
-      // Active whenever NOT braking for a pre-pinch (so an OPEN hand ALWAYS accelerates smoothly!)
+      // Active whenever NOT braking for a pinch-ready aim (so an OPEN hand ALWAYS accelerates smoothly!)
       if (!shouldSlowForPinch) {
         const cxNorm = gestureState.cursorX;
         if (cxNorm > 0.68) {
@@ -178,11 +174,11 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
     }
     frameState.lastYaw = yaw;
 
-    // Only slow down when actively pre-pinching near a card; open palm keeps full lively orbital speed!
-    const baseOrbitSpeed = shouldSlowForPinch ? 0.025 : 0.22;
+    // Smoothly brake orbit ONLY when poised in pinch-ready near a card; open palm keeps full lively orbital speed!
+    const baseOrbitSpeed = shouldSlowForPinch ? 0.018 : 0.22;
     frameState.orbitAngle += (baseOrbitSpeed + frameState.spinVelocity) * deltaTime;
 
-    const dampingRate = shouldSlowForPinch ? 8.0 : frameState.activeEdgeSpinDir !== 0 ? 0.35 : 1.25;
+    const dampingRate = shouldSlowForPinch ? 9.5 : frameState.activeEdgeSpinDir !== 0 ? 0.35 : 1.25;
     frameState.spinVelocity *= Math.exp(-deltaTime * dampingRate);
     if (Math.abs(frameState.spinVelocity) < 0.006) frameState.spinVelocity = 0;
   } else {
@@ -278,11 +274,19 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
 
       const cardWidth = cardVisualBaseW * scale;
       const isInteractive = occlusionOpacity >= 0.42 && nz >= -0.22;
-      const cursorDist = Math.hypot(screenX - cursorScreenX, screenY - cursorScreenY);
+      const dxCursor = Math.abs(screenX - cursorScreenX);
+      const dyCursor = Math.abs(screenY - cursorScreenY);
+      const cursorDist = Math.hypot(dxCursor, dyCursor);
+      // Generous proximity halo starts slowing the card as your pinch-ready hand approaches!
+      const isNearForSlowdown =
+        isInteractive &&
+        dxCursor <= cardWidth * 1.32 &&
+        dyCursor <= cardWidth * 1.24 + 26;
+      // Crisp hover target highlights the exact card that will open on actual pinch contact!
       const isUnderCursor =
         isInteractive &&
-        Math.abs(screenX - cursorScreenX) <= cardWidth * 1.05 &&
-        Math.abs(screenY - cursorScreenY) <= cardWidth * 1.0 + 22;
+        dxCursor <= cardWidth * 1.0 &&
+        dyCursor <= cardWidth * 0.96 + 20;
 
       const proj = { x: screenX, y: screenY, z: nz * 6, scale };
       return {
@@ -296,6 +300,7 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
         nz,
         occlusionOpacity,
         isInteractive,
+        isNearForSlowdown,
         isUnderCursor,
         cursorDist,
       };
@@ -309,7 +314,7 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
       // Prefer the closest front-most card when two overlap slightly
       .sort((a, b) => b.nz - a.nz || a.cursorDist - b.cursorDist)[0] ?? null;
   const photoUnderCursor = photoUnderCursorCard?.photo ?? null;
-  hoveringCardRef.current = Boolean(photoUnderCursor);
+  nearCardForSlowdownRef.current = projectedCards.some((card) => card.isNearForSlowdown);
 
   const selectedCard = projectedCards.find((card) => card.photo.id === selectedPhotoId);
 
@@ -467,22 +472,30 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
         >
           <div
             className={`relative flex items-center justify-center transition-transform duration-150 ${
-              gestureState.isPinching || isHoveringAnyPhoto ? 'scale-110' : 'scale-100'
+              gestureState.isPinching
+                ? 'scale-[1.15]'
+                : isPinchReady || isHoveringAnyPhoto
+                  ? 'scale-[1.08]'
+                  : 'scale-100'
             }`}
             style={{
               filter: gestureState.isPinching
-                ? 'drop-shadow(0 0 12px rgba(254, 240, 138, 0.95)) drop-shadow(0 2px 6px rgba(0, 0, 0, 0.7))'
-                : isHoveringAnyPhoto
-                  ? 'drop-shadow(0 0 10px rgba(251, 191, 36, 0.9)) drop-shadow(0 2px 6px rgba(0, 0, 0, 0.65))'
-                  : 'drop-shadow(0 0 8px rgba(255, 255, 255, 0.55)) drop-shadow(0 2px 5px rgba(0, 0, 0, 0.65))',
+                ? 'drop-shadow(0 0 13px rgba(254, 240, 138, 0.98)) drop-shadow(0 2px 6px rgba(0, 0, 0, 0.72))'
+                : isPinchReady
+                  ? 'drop-shadow(0 0 11px rgba(251, 191, 36, 0.92)) drop-shadow(0 2px 6px rgba(0, 0, 0, 0.68))'
+                  : isHoveringAnyPhoto
+                    ? 'drop-shadow(0 0 9px rgba(251, 191, 36, 0.78)) drop-shadow(0 2px 6px rgba(0, 0, 0, 0.65))'
+                    : 'drop-shadow(0 0 8px rgba(255, 255, 255, 0.55)) drop-shadow(0 2px 5px rgba(0, 0, 0, 0.65))',
             }}
             role="img"
             aria-label={
               gestureState.isPinching
-                ? 'Pizzico'
-                : gestureState.gesture === 'fist'
-                  ? 'Pugno chiuso'
-                  : 'Mano aperta'
+                ? 'Pizzico attivo'
+                : isPinchReady
+                  ? 'Pronto a pizzicare'
+                  : gestureState.gesture === 'fist'
+                    ? 'Pugno chiuso'
+                    : 'Mano aperta'
             }
           >
             {gestureState.isPinching ? (
@@ -513,6 +526,27 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
                   </linearGradient>
                 </defs>
               </svg>
+            ) : isPinchReady ? (
+              <svg width="38" height="38" viewBox="0 0 38 38" fill="none" xmlns="http://www.w3.org/2000/svg">
+                {/* Poised golden target spark between open thumb & index fingertips (ready to snap!) */}
+                <circle cx="11.5" cy="14" r="2.2" fill="#FEF08A" opacity="0.95" />
+                <path
+                  d="M11.5 9.8V11.2M11.5 16.8V18.2M7.3 14H8.7M14.3 14H15.7"
+                  stroke="#FDE047"
+                  strokeWidth="1.35"
+                  strokeLinecap="round"
+                  opacity="0.85"
+                />
+                {/* Open pinch C-shape hand: arched index above, poised thumb below */}
+                <path
+                  d="M13 10.2C14.8 8.3 18.2 8.2 20.4 10.1L23.2 12.6C24.2 11.7 25.8 11.8 26.8 12.8C27.6 13.7 27.6 15 27 16C28.2 15.6 29.6 16.3 30 17.6C30.4 18.8 29.8 20.1 28.7 20.7C29.7 21 30.4 22 30.3 23.1C30.2 24.3 29.3 25.3 28.1 25.6L24.4 26.8C21.5 27.7 18.3 27.3 15.8 25.6L11.4 22.5C10.1 21.6 9.9 19.7 10.9 18.5C11.9 17.4 13.6 17.3 14.8 18.2L17.4 20.1C18.2 20.7 19.3 20.5 19.8 19.7C20.3 18.9 20.1 17.8 19.3 17.2L15.1 14C13.6 12.9 11.8 11.4 13 10.2Z"
+                  fill="rgba(253, 224, 71, 0.28)"
+                  stroke="#FDE68A"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
             ) : gestureState.gesture === 'fist' ? (
               <svg width="34" height="34" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <path
@@ -528,18 +562,12 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
               <svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <path
                   d="M14.2 18.5V8.8C14.2 7.5 15.2 6.5 16.4 6.5C17.6 6.5 18.6 7.5 18.6 8.8V16.2M18.6 15.2V7.2C18.6 6 19.6 5 20.8 5C22 5 23 6 23 7.2V16.2M23 15.6V9.2C23 8 24 7 25.2 7C26.4 7 27.4 8 27.4 9.2V17.6M27.4 16.8V12.6C27.4 11.5 28.3 10.6 29.4 10.6C30.5 10.6 31.4 11.5 31.4 12.6V21.2C31.4 26.6 27.2 30.8 21.8 30.8H17.4C14.2 30.8 11.2 29.1 9.5 26.4L6.2 21.1C5.4 19.9 5.8 18.2 7 17.4C8.2 16.7 9.8 17 10.6 18.1L14.2 22.4V18.5Z"
-                  fill={isHoveringAnyPhoto ? 'rgba(253, 230, 138, 0.34)' : 'rgba(255, 255, 255, 0.16)'}
+                  fill={isHoveringAnyPhoto ? 'rgba(253, 230, 138, 0.28)' : 'rgba(255, 255, 255, 0.16)'}
                   stroke={isHoveringAnyPhoto ? '#FDE68A' : '#F8FAFC'}
                   strokeWidth="1.65"
                   strokeLinecap="round"
                   strokeLinejoin="round"
                 />
-                {isHoveringAnyPhoto && (
-                  <path
-                    d="M16.4 2.2L17.1 4.3L19.2 5L17.1 5.7L16.4 7.8L15.7 5.7L13.6 5L15.7 4.3L16.4 2.2Z"
-                    fill="#FEF08A"
-                  />
-                )}
               </svg>
             )}
           </div>
@@ -659,18 +687,18 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
                     />
                     <div className="pointer-events-none absolute inset-0 bg-gradient-to-tr from-transparent via-white/[0.04] to-amber-100/[0.12]" />
 
-                  {/* Magnetic Hand Hover Prompt Badge */}
-                  <div
-                    className={`pointer-events-none absolute bottom-1.5 right-1.5 rounded-full border px-2 py-0.5 text-[9px] font-semibold tracking-wide shadow-md backdrop-blur-sm transition-all duration-150 ${
-                      isHoveredByHand
-                        ? isPrePinchPose
-                          ? 'border-amber-200 bg-amber-400/25 text-amber-50 opacity-100 scale-105'
-                          : 'border-amber-200/70 bg-black/75 text-amber-100 opacity-100 scale-100'
-                        : 'border-amber-200/70 bg-black/75 text-amber-100 opacity-0 scale-90'
-                    }`}
-                  >
-                    🤏 Apri
-                  </div>
+                    {/* Magnetic Hand Hover Prompt Badge */}
+                    <div
+                      className={`pointer-events-none absolute bottom-1.5 right-1.5 rounded-full border px-2 py-0.5 text-[9px] font-semibold tracking-wide shadow-md backdrop-blur-sm transition-all duration-150 ${
+                        isHoveredByHand
+                          ? isPinchReady
+                            ? 'border-amber-200 bg-amber-400/30 text-amber-50 opacity-100 scale-105 shadow-[0_0_12px_rgba(251,191,36,0.55)]'
+                            : 'border-amber-200/70 bg-black/75 text-amber-100 opacity-100 scale-100'
+                          : 'border-amber-200/70 bg-black/75 text-amber-100 opacity-0 scale-90'
+                      }`}
+                    >
+                      {isPinchReady ? '🤏 Pizzica' : '🤏 Apri'}
+                    </div>
                   </div>
 
                   {/* Classic Polaroid Bottom Chin with Romantic Serif Title */}

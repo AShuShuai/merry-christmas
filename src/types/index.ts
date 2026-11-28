@@ -54,12 +54,13 @@ export interface PhotoTransitionOrigin {
 
 export interface HandGestureState {
   hasHand: boolean;
-  gesture: 'none' | 'move' | 'pinch' | 'open_palm' | 'fist';
+  gesture: 'none' | 'move' | 'pinch_ready' | 'pinch' | 'open_palm' | 'fist';
   cursorX: number; // Screen normalized 0-1
   cursorY: number; // Screen normalized 0-1
   deltaX: number;
   deltaY: number;
   pinchDistance: number;
+  isPinchReady: boolean;
   isPinching: boolean;
 }
 

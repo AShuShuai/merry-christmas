@@ -60,12 +60,15 @@ class HandTrackerEngine {
   private smoothCursorY: number | null = null;
   private isPinching: boolean = false;
   private smoothedPinchDistance: number | null = null;
+  private pinchPeakDistance: number = 1;
+  private pinchPeakTime: number = 0;
   private pinchLastStrictTime: number = 0;
   private pinchStartFrames: number = 0;
   private smoothDeltaX: number = 0;
   private smoothDeltaY: number = 0;
   private lastEmittedHasHand: boolean = false;
   private lastEmittedGesture: HandGestureState['gesture'] = 'none';
+  private lastEmittedPinchReady: boolean = false;
   private lastEmittedPinching: boolean = false;
   private lastEmittedCursorX: number = -1;
   private lastEmittedCursorY: number = -1;
@@ -202,6 +205,8 @@ class HandTrackerEngine {
     this.smoothCursorY = null;
     this.isPinching = false;
     this.smoothedPinchDistance = null;
+    this.pinchPeakDistance = 1;
+    this.pinchPeakTime = 0;
     this.pinchLastStrictTime = 0;
     this.pinchStartFrames = 0;
     this.lastVideoTime = -1;
@@ -210,6 +215,7 @@ class HandTrackerEngine {
     this.smoothDeltaY = 0;
     this.lastEmittedHasHand = false;
     this.lastEmittedGesture = 'none';
+    this.lastEmittedPinchReady = false;
     this.lastEmittedPinching = false;
     this.lastEmittedCursorX = -1;
     this.lastEmittedCursorY = -1;
@@ -269,12 +275,15 @@ class HandTrackerEngine {
       this.smoothCursorY = null;
       this.isPinching = false;
       this.smoothedPinchDistance = null;
+      this.pinchPeakDistance = 1;
+      this.pinchPeakTime = 0;
       this.pinchLastStrictTime = 0;
       this.pinchStartFrames = 0;
       this.smoothDeltaX = 0;
       this.smoothDeltaY = 0;
       this.lastEmittedHasHand = false;
       this.lastEmittedGesture = 'none';
+      this.lastEmittedPinchReady = false;
       this.lastEmittedPinching = false;
       this.lastEmittedCursorX = 0.5;
       this.lastEmittedCursorY = 0.5;
@@ -288,6 +297,7 @@ class HandTrackerEngine {
         deltaX: 0,
         deltaY: 0,
         pinchDistance: 1,
+        isPinchReady: false,
         isPinching: false,
       });
       return;
@@ -312,15 +322,15 @@ class HandTrackerEngine {
 
     // High-DPI Ergonomic Active-Zone Mapping:
     // Maps compact central webcam box [0.21..0.79] x [0.18..0.82] onto full [0..1] screen (+22% higher DPI!)
-    // Weighted toward index fingertip (65% index + 35% thumb) so closing thumb into a pinch doesn't pull cursor off-target!
-    const rawMirrorX = 1 - (indexTip.x * 0.65 + thumb.x * 0.35);
-    const rawMirrorY = indexTip.y * 0.65 + thumb.y * 0.35;
+    // Anchored strongly to index fingertip (72% index + 28% thumb) so snapping thumb shut doesn't yank cursor off-card!
+    const rawMirrorX = 1 - (indexTip.x * 0.72 + thumb.x * 0.28);
+    const rawMirrorY = indexTip.y * 0.72 + thumb.y * 0.28;
     const rawCursorX = clamp01((rawMirrorX - 0.21) / 0.58);
     const rawCursorY = clamp01((rawMirrorY - 0.18) / 0.64);
 
     // One-Euro Style Velocity-Adaptive Filter:
-    // - Slow / aiming: low alpha (~0.26) eliminates micro-jitter for surgical pinch accuracy
-    // - Fast sweep: high alpha (~0.86) gives instant, zero-lag high-DPI tracking!
+    // - Slow / aiming: low alpha (~0.24) eliminates micro-jitter for surgical pinch accuracy
+    // - Fast sweep: high alpha (~0.88) gives instant, zero-lag high-DPI tracking!
     if (this.smoothCursorX === null || this.smoothCursorY === null) {
       this.smoothCursorX = rawCursorX;
       this.smoothCursorY = rawCursorY;
@@ -363,12 +373,20 @@ class HandTrackerEngine {
       0.001
     );
     const rawNormalizedPinchDistance = landmarkDistance2D(thumb, indexTip) / palmLength2D;
-    // Responsive smoothing (0.78 weight to latest frame so quick natural pinches register immediately!)
+    // Responsive smoothing (0.80 weight to latest frame so quick natural pinches register immediately!)
     this.smoothedPinchDistance = this.smoothedPinchDistance === null
       ? rawNormalizedPinchDistance
       : this.smoothedPinchDistance +
-        (rawNormalizedPinchDistance - this.smoothedPinchDistance) * 0.78;
+        (rawNormalizedPinchDistance - this.smoothedPinchDistance) * 0.80;
     const normalizedPinchDistance = this.smoothedPinchDistance;
+
+    const nowMs = performance.now();
+    // Track recent peak separation (~360ms window) to distinguish a crisp intentional pinch snap from resting ready-pose!
+    if (normalizedPinchDistance >= this.pinchPeakDistance || nowMs - this.pinchPeakTime > 360) {
+      this.pinchPeakDistance = normalizedPinchDistance;
+      this.pinchPeakTime = nowMs;
+    }
+    const closingDrop = this.pinchPeakDistance - normalizedPinchDistance;
 
     const extensions = [
       fingerExtension(wrist, landmarks[5], landmarks[6], indexTip),
@@ -385,54 +403,69 @@ class HandTrackerEngine {
       otherFingersAverage < 0.22 &&
       indexReach < 1.18;
 
-    // A natural pinch allows relaxed/half-curled middle-ring-pinky fingers (just not a full slammed tight fist!)
-    const isTightPinch = normalizedPinchDistance < 0.39 && !tightFist;
-    const pinchCandidate = normalizedPinchDistance < 0.47 && !tightFist;
-    const isFist = tightFist && !isTightPinch;
+    // STAGE 3: ACTUAL PINCH ACTION (thumb & index fingertips physically meeting / snapping shut!)
+    // - Direct contact (< 0.265): immediate 1-frame trigger
+    // - Rapid intentional snap from pinch-ready (< 0.315 with drop >= 0.085): immediate 1-frame trigger
+    // - Gentle contact (< 0.295): 2-frame confirm
+    // Holding a pinch-ready C-shape (~0.33..0.72) NEVER triggers an accidental pinch!
+    const isDirectPinchContact = normalizedPinchDistance < 0.265 && !tightFist;
+    const isSnapPinchContact =
+      normalizedPinchDistance < 0.315 &&
+      !tightFist &&
+      closingDrop >= 0.085;
+    const pinchContactCandidate = normalizedPinchDistance < 0.295 && !tightFist;
+    const isFist = tightFist && !isDirectPinchContact;
 
     if (isFist) {
       this.isPinching = false;
       this.pinchLastStrictTime = 0;
       this.pinchStartFrames = 0;
     } else if (this.isPinching) {
-      const now = performance.now();
-      if (pinchCandidate) this.pinchLastStrictTime = now;
-      // Clean crisp release: exits pinch immediately once fingers separate past 0.51 so repeat pinches work effortlessly!
+      if (pinchContactCandidate) this.pinchLastStrictTime = nowMs;
+      // Crisp release back into pinch_ready as soon as fingertips open past 0.355!
       const remainsPinched =
-        normalizedPinchDistance < 0.51 &&
+        normalizedPinchDistance < 0.355 &&
         !tightFist &&
-        now - this.pinchLastStrictTime <= 180;
+        nowMs - this.pinchLastStrictTime <= 160;
       if (!remainsPinched) {
         this.isPinching = false;
         this.pinchLastStrictTime = 0;
+        this.pinchPeakDistance = normalizedPinchDistance;
+        this.pinchPeakTime = nowMs;
       }
     } else {
-      this.pinchStartFrames = pinchCandidate ? this.pinchStartFrames + 1 : 0;
-      // Instant 1-frame trigger on clear pinch (< 0.39), 2-frame confirm on borderline pinch (0.39..0.47)
-      if (isTightPinch || this.pinchStartFrames >= 2) {
+      this.pinchStartFrames = pinchContactCandidate ? this.pinchStartFrames + 1 : 0;
+      if (isDirectPinchContact || isSnapPinchContact || this.pinchStartFrames >= 2) {
         this.isPinching = true;
-        this.pinchLastStrictTime = performance.now();
+        this.pinchLastStrictTime = nowMs;
         this.pinchStartFrames = 0;
       }
     }
     const isPinching = this.isPinching;
+
+    // STAGE 2: PINCH-READY POSE ("mano a forma di pizzico" — thumb & index poised toward each other, NOT touching yet!)
+    // Clearly separated from wide open palm (fingers straight & thumb-index >= 0.68) AND from actual pinch contact (< 0.295)
+    const isPinchReady =
+      !isFist &&
+      !isPinching &&
+      (normalizedPinchDistance < 0.66 ||
+        (normalizedPinchDistance < 0.78 && extensions[0] < 0.80));
 
     let gesture: HandGestureState['gesture'] = 'move';
     if (isFist) {
       gesture = 'fist';
     } else if (isPinching) {
       gesture = 'pinch';
-    } else if (
-      extensions.every((extension) => extension > 0.45) &&
-      normalizedPinchDistance >= 0.66
-    ) {
+    } else if (isPinchReady) {
+      gesture = 'pinch_ready';
+    } else if (extensions.every((extension) => extension > 0.45)) {
       gesture = 'open_palm';
     }
 
-    // Draw Skeleton on PIP Canvas
-    this.drawSkeleton(ctx, landmarks, w, h, isPinching);
+    // Draw Skeleton on PIP Canvas (blue = open, amber = pinch-ready, cyan = active pinch!)
+    this.drawSkeleton(ctx, landmarks, w, h, isPinchReady, isPinching);
 
-    // Finer high-DPI emission threshold (0.0012) + react immediately to pre-pinch distance changes!
+    // Finer high-DPI emission threshold (0.0012) + react immediately to pinch-ready / pinch changes!
     const cursorMoved =
       Math.abs(cursorX - this.lastEmittedCursorX) >= 0.0012 ||
       Math.abs(cursorY - this.lastEmittedCursorY) >= 0.0012;
@@ -440,6 +473,7 @@ class HandTrackerEngine {
     const stateChanged =
       !this.lastEmittedHasHand ||
       gesture !== this.lastEmittedGesture ||
+      isPinchReady !== this.lastEmittedPinchReady ||
       isPinching !== this.lastEmittedPinching ||
       cursorMoved ||
       pinchChanged ||
@@ -450,6 +484,7 @@ class HandTrackerEngine {
 
     this.lastEmittedHasHand = true;
     this.lastEmittedGesture = gesture;
+    this.lastEmittedPinchReady = isPinchReady;
     this.lastEmittedPinching = isPinching;
     this.lastEmittedCursorX = cursorX;
     this.lastEmittedCursorY = cursorY;
@@ -464,6 +499,7 @@ class HandTrackerEngine {
       deltaX,
       deltaY,
       pinchDistance: normalizedPinchDistance,
+      isPinchReady,
       isPinching,
     });
   }
@@ -473,6 +509,7 @@ class HandTrackerEngine {
     landmarks: Array<{ x: number; y: number }>,
     w: number,
     h: number,
+    isPinchReady: boolean,
     isPinching: boolean
   ) {
     const connections = [
@@ -490,7 +527,11 @@ class HandTrackerEngine {
     ctx.scale(-1, 1);
 
     // Draw lines
-    ctx.strokeStyle = isPinching ? 'rgba(0, 240, 255, 0.95)' : 'rgba(147, 197, 253, 0.65)';
+    ctx.strokeStyle = isPinching
+      ? 'rgba(0, 240, 255, 0.96)'
+      : isPinchReady
+        ? 'rgba(251, 191, 36, 0.88)'
+        : 'rgba(147, 197, 253, 0.65)';
     ctx.lineWidth = 2.5;
     ctx.beginPath();
     for (const [start, end] of connections) {
@@ -505,13 +546,18 @@ class HandTrackerEngine {
     for (let i = 0; i < landmarks.length; i++) {
       const p = landmarks[i];
       const isTip = [4, 8, 12, 16, 20].includes(i);
+      const isPinchFinger = i === 4 || i === 8;
       ctx.fillStyle = isTip
-        ? isPinching && (i === 4 || i === 8)
+        ? isPinching && isPinchFinger
           ? '#00f0ff'
-          : '#ffffff'
-        : 'rgba(59, 130, 246, 0.85)';
+          : isPinchReady && isPinchFinger
+            ? '#fde047'
+            : '#ffffff'
+        : isPinchReady
+          ? 'rgba(245, 158, 11, 0.85)'
+          : 'rgba(59, 130, 246, 0.85)';
 
-      const radius = isTip ? 4.5 : 3;
+      const radius = isTip ? (isPinchFinger && (isPinchReady || isPinching) ? 5 : 4.5) : 3;
       ctx.beginPath();
       ctx.arc(p.x * w, p.y * h, radius, 0, Math.PI * 2);
       ctx.fill();
