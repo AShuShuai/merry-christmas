@@ -306,7 +306,9 @@ function drawGiftModels(
   diamondSprite: HTMLCanvasElement | null,
   time: number,
   intro: number,
-  scatter: number
+  scatter: number,
+  layer: 'back' | 'front',
+  trunkZ: number
 ) {
   if (intro <= 0.05 || scatter >= 0.14) return;
 
@@ -329,7 +331,9 @@ function drawGiftModels(
     }
   };
 
-  // True 3D projection for each grounded gift, sorted strictly back-to-front by camera depth
+  // True 3D depth occlusion against the wooden trunk:
+  // 'back' draws only gifts behind trunkZ (smaller z = farther from camera),
+  // 'front' draws only gifts in front of trunkZ (larger z = closer to camera)!
   const prepared = GIFT_MODELS.map((gift) => {
     const centerY = gift.baseY + gift.height / 2;
     const origin = projectFrame(gift.x, centerY, gift.z);
@@ -343,7 +347,11 @@ function drawGiftModels(
     };
 
     return { gift, origin, projectLocal };
-  }).sort((a, b) => a.origin.z - b.origin.z);
+  })
+    .filter(({ origin }) => (layer === 'back' ? origin.z < trunkZ : origin.z >= trunkZ))
+    .sort((a, b) => a.origin.z - b.origin.z);
+
+  if (prepared.length === 0) return;
 
   ctx.save();
   ctx.globalCompositeOperation = 'source-over';
@@ -1327,8 +1335,25 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         );
       }
 
-      // 4c. Sculpted 3D Tapered Wooden Trunk (drawn behind front pine boughs so foliage drapes naturally!)
+      // 4c. True 3D Painter's Order at Tree Base: Back Gifts -> Sculpted Wooden Trunk -> Front Gifts!
       if (scatter < 0.14 && intro > 0.05) {
+        const trunkCenterRef = projectFrame(0, -9.8, 0);
+        const trunkZ = trunkCenterRef.z;
+
+        // Pass 1: Gifts positioned BEHIND the wooden trunk (occluded by trunk!)
+        drawGiftModels(
+          ctx,
+          projectFrame,
+          goldSparkSpriteRef.current || sprites[0],
+          diamondStarSpriteRef.current,
+          time,
+          intro,
+          scatter,
+          'back',
+          trunkZ
+        );
+
+        // Pass 2: Sculpted 3D Tapered Wooden Trunk
         const trunkAlpha = Math.max(0, 1 - scatter / 0.14) * Math.min(1, intro * 1.4);
         const revealTopY = -10.3 + Math.min(1, intro * 1.35) * 3.1;
         const baseCenter = projectFrame(0, -10.35, 0);
@@ -1430,6 +1455,19 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
           }
           ctx.restore();
         }
+
+        // Pass 3: Gifts positioned IN FRONT of the wooden trunk (naturally occluding trunk base!)
+        drawGiftModels(
+          ctx,
+          projectFrame,
+          goldSparkSpriteRef.current || sprites[0],
+          diamondStarSpriteRef.current,
+          time,
+          intro,
+          scatter,
+          'front',
+          trunkZ
+        );
       }
 
       // 5. Unified Color-Morphing Particles — BIG BANG EXPLOSION -> ZERO-G STARFIELD -> FACE REFORMATION
@@ -1865,17 +1903,6 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
 
       if (frameTheme.id === 'snowglobe' && scatter < 0.1) {
         drawTreeDecorations(ctx, projectFrame, time, intro, scatter);
-      }
-      if (scatter < 0.14) {
-        drawGiftModels(
-          ctx,
-          projectFrame,
-          goldSparkSpriteRef.current || sprites[0],
-          diamondStarSpriteRef.current,
-          time,
-          intro,
-          scatter
-        );
       }
 
       // 6. Orbiting Points (fairy dust)
