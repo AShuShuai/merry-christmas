@@ -193,7 +193,7 @@ export const THEMES: Record<ThemeId, Theme> = {
 
 export const DEFAULT_SETTINGS: TreeSettings = {
   themeId: 'snowglobe',
-  totalPoints: 4800,
+  totalPoints: 3600,
   strings: 3,
   turns: 27,
   rotationSpeed: 0.35,

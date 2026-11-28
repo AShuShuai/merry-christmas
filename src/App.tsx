@@ -14,8 +14,9 @@ import {
 import { DEFAULT_SETTINGS } from './config/themes';
 import { chimeAudio } from './utils/audio';
 
-const SETTINGS_STORAGE_KEY = 'christmas_tree_settings_v7';
+const SETTINGS_STORAGE_KEY = 'christmas_tree_settings_v8';
 const PREVIOUS_SETTINGS_STORAGE_KEYS = [
+  'christmas_tree_settings_v7',
   'christmas_tree_settings_v6',
   'christmas_tree_settings_v5',
   'christmas_tree_settings_v4',
@@ -69,7 +70,19 @@ const ChristmasScene = React.memo<ChristmasSceneProps>(({
       scatter: number,
       intro: number
     ) => {
-      setCameraState({ yaw, pitch, width, height, focal, scatter, intro });
+      setCameraState((prev) => {
+        if (
+          Math.abs(prev.yaw - yaw) < 0.002 &&
+          Math.abs(prev.pitch - pitch) < 0.002 &&
+          Math.abs(prev.scatter - scatter) < 0.003 &&
+          Math.abs(prev.intro - intro) < 0.003 &&
+          prev.width === width &&
+          prev.height === height
+        ) {
+          return prev;
+        }
+        return { yaw, pitch, width, height, focal, scatter, intro };
+      });
     },
     []
   );
