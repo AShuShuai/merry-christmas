@@ -1134,7 +1134,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         starSequenceRef.current += dt;
       }
 
-      // Keep the DOM photo overlay in step with canvas animation (throttled to ~15fps & skipped when photos are hidden!)
+      // Keep the DOM photo overlay silky (~30fps while portrait/photos are visible, 0fps when tree is closed!)
       const lastSent = lastCameraSentRef.current;
       const photosActiveOrTransitioning =
         scatter > 0.08 ||
@@ -1143,7 +1143,8 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         lastSent.intro < 0.99 ||
         lastSent.w !== w ||
         lastSent.h !== h;
-      if (photosActiveOrTransitioning && currentTimeMs - lastCameraUpdateRef.current >= 66) {
+      const cameraIntervalMs = scatter > 0.25 ? 32 : 66;
+      if (photosActiveOrTransitioning && currentTimeMs - lastCameraUpdateRef.current >= cameraIntervalMs) {
         onCameraUpdateRef.current?.(yaw, pitch, w, h, effFocal, scatter, intro);
         lastCameraUpdateRef.current = currentTimeMs;
         lastCameraSentRef.current = { w, h, scatter, intro };
