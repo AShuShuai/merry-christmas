@@ -53,8 +53,8 @@ export const FloatingPhotosOverlay: React.FC<Props> = ({
   focal,
   scatter = 0,
   introProgress,
-  treeIsDispersed,
-  portraitReady,
+  treeIsDispersed: _treeIsDispersed,
+  portraitReady: _portraitReady,
   gestureState,
   onSelectPhoto,
   onPhotoOriginUpdate,
@@ -91,11 +91,9 @@ export const FloatingPhotosOverlay: React.FC<Props> = ({
 
   const cursorScreenX = gestureState.cursorX * width;
   const cursorScreenY = gestureState.cursorY * height;
-  const revealProgress = Math.max(0, Math.min(1, (scatter - 0.16) / 0.42));
-  const photoVisibility = treeIsDispersed
-    ? revealProgress * revealProgress * (3 - 2 * revealProgress) * (portraitReady ? 1 - scatter : 1)
-    : 0;
-  const photosReady = introProgress >= 1 && treeIsDispersed && scatter >= 0.58 && !portraitReady;
+  // Photos orbit gracefully around the formed Christmas tree, fading out when morphed into the portrait
+  const photoVisibility = Math.max(0, 1 - scatter * 1.5) * Math.min(1, introProgress * 1.25);
+  const photosReady = introProgress >= 0.75 && scatter < 0.35;
   const photoIds = photos.map((photo) => photo.id).join('|');
   if (photoIdsRef.current !== photoIds) {
     const positions = new Map<string, OrbitPosition>();

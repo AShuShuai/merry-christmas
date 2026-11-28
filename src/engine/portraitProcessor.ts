@@ -37,7 +37,7 @@ const MEDIAPIPE_WASM = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.2
 const FACE_MODEL =
   'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
 
-const TOTAL_PORTRAIT_POINTS = 9600;
+const TOTAL_PORTRAIT_POINTS = 4800;
 const TAU = Math.PI * 2;
 
 let tasksPromise: Promise<PortraitTasks> | null = null;
@@ -412,7 +412,7 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
       luminance,
       imageWidth,
       imageHeight,
-      380,
+      200,
       0.15,
       3.0,
       0.5,
@@ -430,7 +430,7 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
       luminance,
       imageWidth,
       imageHeight,
-      380,
+      200,
       0.15,
       3.0,
       0.5,
@@ -448,7 +448,7 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
       luminance,
       imageWidth,
       imageHeight,
-      280,
+      140,
       0.32,
       2.6,
       0.008,
@@ -466,7 +466,7 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
       luminance,
       imageWidth,
       imageHeight,
-      280,
+      140,
       0.32,
       2.6,
       0.008,
@@ -484,7 +484,7 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
       luminance,
       imageWidth,
       imageHeight,
-      380,
+      190,
       0.85,
       3.2,
       0.010,
@@ -502,7 +502,7 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
       luminance,
       imageWidth,
       imageHeight,
-      240,
+      120,
       0.55,
       2.5,
       0.55,
@@ -523,7 +523,7 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
       luminance,
       imageWidth,
       imageHeight,
-      680,
+      340,
       0.48,
       3.2,
       0.55,
@@ -601,7 +601,7 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
   }
 
   // Allocate remaining points
-  const pointsRemaining = Math.max(2500, TOTAL_PORTRAIT_POINTS - allPoints.length - 700);
+  const pointsRemaining = Math.max(1600, TOTAL_PORTRAIT_POINTS - allPoints.length - 350);
 
   if (totalDensity > 0) {
     const gridCols = 140;
@@ -704,7 +704,7 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
   }
 
   // 3. Cosmic Nebula Halo & Floating Stars (Carefully bounded, NEVER clamped to borders)
-  const haloPointsCount = 700;
+  const haloPointsCount = 350;
   for (let i = 0; i < haloPointsCount; i++) {
     const angle = (Math.random() < 0.65)
       ? Math.PI * 0.7 + (Math.random() - 0.5) * Math.PI * 0.8 // Left side cluster

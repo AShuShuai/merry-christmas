@@ -888,12 +888,12 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         ? createProjector(yaw * (1 - portraitProgress), pitch * (1 - portraitProgress), w, h, effFocal)
         : projectFrame;
       const portraitAspect = portraitTargetsRef.current?.aspect ?? portraitAspectRef.current;
-      const targetMaxH = h * 0.72;
-      const targetMaxW = w * 0.70;
+      const targetMaxH = h * 0.80;
+      const targetMaxW = w * 0.82;
       const portraitHeight = Math.min(targetMaxH, targetMaxW / portraitAspect);
       const portraitWidth = portraitHeight * portraitAspect;
       const portraitLeft = (w - portraitWidth) / 2;
-      const portraitTop = Math.max(h * 0.05, (h * 0.84 - portraitHeight) / 2);
+      const portraitTop = Math.max(h * 0.035, (h * 0.86 - portraitHeight) / 2);
       if (frameSettings.treeState !== 'formed' || !frameSettings.showStar) {
         starSequenceRef.current = 0;
       } else if (scatter < 0.06 && intro >= 0.9) {
@@ -1025,6 +1025,15 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
       const whiteGlow = Math.pow(portraitProgress, 1.3);
       const treeColorGlow = Math.max(0, 1 - whiteGlow);
 
+      // Pre-calculate frame constants outside particle loop for silky 60 FPS performance
+      const sinYawParallax = Math.sin(yaw * 0.55) * portraitWidth * 0.04;
+      const sinPitchParallax = -Math.sin(pitch * 0.55) * portraitHeight * 0.04;
+      const isPurePortrait = portraitProgress >= 0.985;
+      const isPureTree = portraitProgress <= 0.015;
+      const gathering = (1 - intro) * Math.min(w, h) * 0.045;
+
+      const flareBatch: Array<{ x: number; y: number; len: number }> = [];
+
       const renderParticle = (pt: TreePoint, isTemp: boolean) => {
         // CULLING CHECK 1: If temporary star particle has dissolved in mid-air, skip completely!
         if (isTemp && isClosing && tempReturnFactor <= 0.005) {
@@ -1043,19 +1052,38 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
           }
         }
 
-        const p = particleProjectFrame(pt.x * breathe, pt.y, pt.z * breathe);
-        const px = w / 2 + (p.x - w / 2) * intro;
-        const py = h / 2 + (p.y - h / 2) * intro;
-        let cx = pt.sx + (px - pt.sx) * intro;
-        let cy = pt.sy + (py - pt.sy) * intro;
+        let cx = 0;
+        let cy = 0;
+        let depth = 0.5;
+        let treeSize = 1.0;
 
-        if (hasPortrait) {
-          // 3D Volumetric depth parallax (subtle shift with camera rotation)
+        // Fast 3D Tree Projection (completely skipped when morphed into pure portrait mode!)
+        if (!isPurePortrait) {
+          const p = particleProjectFrame(pt.x * breathe, pt.y, pt.z * breathe);
+          const px = w / 2 + (p.x - w / 2) * intro;
+          const py = h / 2 + (p.y - h / 2) * intro;
+          cx = pt.sx + (px - pt.sx) * intro;
+          cy = pt.sy + (py - pt.sy) * intro;
+
+          if (gathering > 0.001) {
+            const swirl = pt.phase + time * (1.5 + pt.t);
+            cx += Math.sin(swirl) * gathering;
+            cy += Math.cos(swirl * 1.35) * gathering * 0.72;
+          }
+
+          depth = Math.max(0, Math.min(1, (p.z + 8) / 15));
+          const twinkle = 0.5 + 0.5 * Math.sin(time * 4 + pt.phase);
+          const waveTwinkle = 0.5 + 0.5 * Math.sin(time * 3.5 - pt.t * 26);
+          const spark = Math.pow(Math.max(0, Math.sin(time * 2.2 + pt.phase * 2)), 16);
+          treeSize = pt.base * p.scale * (0.8 + 0.4 * twinkle + 0.3 * waveTwinkle + 0.5 * spark);
+        }
+
+        // Fast Portrait Mapping (completely skipped when in pure tree mode!)
+        if (hasPortrait && !isPureTree) {
           const pZ = pt.portraitZ || 0;
-          const volOffsetX = Math.sin(yaw * 0.55) * pZ * portraitWidth * 0.04;
-          const volOffsetY = -Math.sin(pitch * 0.55) * pZ * portraitHeight * 0.04;
+          const volOffsetX = sinYawParallax * pZ;
+          const volOffsetY = sinPitchParallax * pZ;
 
-          // Gentle floating wave-like animation and organic sub-pixel jitter
           const wave = Math.sin(time * 1.3 + pt.phase + pt.portraitY * 5.5) * 1.1;
           const floatX = Math.cos(time * 1.05 + pt.phase * 1.7 + pt.portraitX * 4.2) * 0.8;
           const floatY = Math.sin(time * 1.15 + pt.phase * 2.1 + pt.portraitY * 3.8) * 0.8;
@@ -1065,45 +1093,29 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
           const targetX = portraitLeft + pt.portraitX * portraitWidth + (volOffsetX + wave + floatX + jitX);
           const targetY = portraitTop + pt.portraitY * portraitHeight + (volOffsetY + wave * 0.65 + floatY + jitY);
 
-          // Accelerated snap-back trail when returning
-          cx += (targetX - cx) * returnEase;
-          cy += (targetY - cy) * returnEase;
+          if (isPurePortrait) {
+            cx = targetX;
+            cy = targetY;
+          } else {
+            cx += (targetX - cx) * returnEase;
+            cy += (targetY - cy) * returnEase;
+          }
         }
 
-        const gathering = 1 - intro;
-        const drift = gathering * Math.min(w, h) * 0.045;
-        const swirl = pt.phase + time * (1.5 + pt.t);
-        cx += Math.sin(swirl) * drift;
-        cy += Math.cos(swirl * 1.35) * drift * 0.72;
-
-        let depth = (p.z + 8) / 15;
-        if (depth < 0) depth = 0;
-        if (depth > 1) depth = 1;
-
-        const twinkle = 0.5 + 0.5 * Math.sin(time * 4 + pt.phase);
-        const waveTwinkle = 0.5 + 0.5 * Math.sin(time * 3.5 - pt.t * 26);
-        const spark = Math.pow(Math.max(0, Math.sin(time * 2.2 + pt.phase * 2)), 16);
-        const glow = (0.4 + 0.35 * twinkle + 0.45 * waveTwinkle * waveTwinkle + 0.6 * spark) * heartbeat;
-        const treeSize = pt.base * p.scale * (0.8 + 0.4 * twinkle + 0.3 * waveTwinkle + 0.5 * spark);
-
-        // Portrait particle size: fine micro-dots (0.5px to 1.1px radius) to avoid blown-out white blobs
         const portraitRadius = Math.max(0.5, Math.min(1.1, pt.portraitSize || 0.8));
         const treeRadius = Math.max(0.5, treeSize * 0.5);
         const radius = treeRadius * (1 - portraitProgress) + portraitRadius * portraitProgress;
 
-        // Asynchronous glowing & twinkling
-        const pSpeed = pt.portraitSpeed || 2.4;
-        const pTwinkle = 0.82 + 0.18 * Math.sin(time * pSpeed + pt.phase * 3.7);
-        const pFlare = Math.pow(Math.max(0, Math.sin(time * 1.6 + pt.phase * 4.9)), 14) * 0.7;
-
-        const baseAlpha = Math.min(1, glow * (0.4 + 0.6 * depth) * pt.fade * (0.4 + 0.6 * intro));
-
         // 1. Warm tree colors (greens, golds, scarlets): smoothly fades back in as it nears tree
-        if (!isTemp) {
-          const originalSprite = sprites[pt.c] || sprites[0];
+        if (!isTemp && treeColorGlow > 0.005) {
+          const twinkle = 0.5 + 0.5 * Math.sin(time * 4 + pt.phase);
+          const spark = Math.pow(Math.max(0, Math.sin(time * 2.2 + pt.phase * 2)), 16);
+          const glow = (0.4 + 0.35 * twinkle + 0.6 * spark) * heartbeat;
+          const baseAlpha = Math.min(1, glow * (0.4 + 0.6 * depth) * pt.fade * (0.4 + 0.6 * intro));
           const treeAlpha = baseAlpha * treeColorGlow;
           if (treeAlpha > 0.005) {
             ctx.globalAlpha = treeAlpha;
+            const originalSprite = sprites[pt.c] || sprites[0];
             const drawSize = radius * 2;
             ctx.drawImage(originalSprite, cx - drawSize / 2, cy - drawSize / 2, drawSize, drawSize);
           }
@@ -1111,6 +1123,8 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
 
         // 2. Pure brilliant white stardust (#FFFFFF): fine 0.5-1.1px dots with modulated 0.35-0.85 alpha
         if (whiteGlow > 0.005) {
+          const pSpeed = pt.portraitSpeed || 2.4;
+          const pTwinkle = 0.82 + 0.18 * Math.sin(time * pSpeed + pt.phase * 3.7);
           const lum = pt.portraitLight ?? 0.7;
           const lumAlpha = 0.35 + 0.50 * lum;
           const tempFadeMult = isTemp ? tempReturnFactor : 1.0;
@@ -1120,30 +1134,18 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
             priorityCullMult *
             tempFadeMult;
 
-          if (finalAlpha > 0.005) {
-            // Fine, crisp white micro-dot (prevents overexposure and creates clear chiaroscuro)
+          if (finalAlpha > 0.008) {
             ctx.globalAlpha = finalAlpha;
-            ctx.fillStyle = '#ffffff';
-            ctx.beginPath();
-            ctx.arc(cx, cy, radius, 0, TAU);
-            ctx.fill();
-
-            // Soft, gentle starlight aura (restrained size prevents additive blowout on skin)
-            const auraSize = radius * 2.2;
-            ctx.globalAlpha = finalAlpha * 0.35;
+            // High-performance GPU sprite draw: renders crisp solid white core + aura in a single blit!
+            const auraSize = radius * 2.4;
             ctx.drawImage(starlightSprite, cx - auraSize / 2, cy - auraSize / 2, auraSize, auraSize);
 
-            // 4-Pointed Diamond Star Twinkle Cross for sparkle stars (matching Image 1)
-            if ((pt.portraitIsSparkle || pFlare > 0.65) && finalAlpha > 0.28) {
-              const flareLen = radius * (2.4 + 1.8 * pFlare);
-              ctx.strokeStyle = `rgba(255, 255, 255, ${Math.min(0.9, finalAlpha * (0.7 + 0.3 * pFlare))})`;
-              ctx.lineWidth = 0.75;
-              ctx.beginPath();
-              ctx.moveTo(cx - flareLen, cy);
-              ctx.lineTo(cx + flareLen, cy);
-              ctx.moveTo(cx, cy - flareLen);
-              ctx.lineTo(cx, cy + flareLen);
-              ctx.stroke();
+            // Batch 4-pointed diamond star sparkle for single-pass stroke
+            if (pt.portraitIsSparkle && finalAlpha > 0.3) {
+              const pFlare = Math.pow(Math.max(0, Math.sin(time * 1.6 + pt.phase * 4.9)), 14) * 0.7;
+              if (pFlare > 0.42) {
+                flareBatch.push({ x: cx, y: cy, len: radius * (2.2 + 1.8 * pFlare) });
+              }
             }
           }
         }
@@ -1158,6 +1160,22 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         for (let i = 0; i < tempPts.length; i++) {
           renderParticle(tempPts[i], true);
         }
+      }
+
+      // Batch render all diamond star sparkles in ONE single stroke call!
+      if (flareBatch.length > 0) {
+        ctx.globalAlpha = 0.88 * whiteGlow;
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 0.75;
+        ctx.beginPath();
+        for (let i = 0; i < flareBatch.length; i++) {
+          const f = flareBatch[i];
+          ctx.moveTo(f.x - f.len, f.y);
+          ctx.lineTo(f.x + f.len, f.y);
+          ctx.moveTo(f.x, f.y - f.len);
+          ctx.lineTo(f.x, f.y + f.len);
+        }
+        ctx.stroke();
       }
 
       // Draw a dense, multicolored brown sparkle trunk, revealed from the roots upward.
@@ -1388,11 +1406,8 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         }
 
         ctx.font = fontStr;
-        // Positioned cleanly below the feathered shoulders (shoulders fade out by normY = 0.78)
-        const textY =
-          hasPortrait && portraitProgress > 0.3
-            ? Math.min(h * 0.92, portraitTop + portraitHeight * 0.84 + 30)
-            : Math.min(h * 0.92, h * 0.88);
+        // Firmly anchored at the bottom of the screen (never moves or jumps during transitions)
+        const textY = Math.round(h * 0.905);
 
         const textGrad = ctx.createLinearGradient(0, textY - size / 2, 0, textY + size / 2);
         textGrad.addColorStop(0, '#ffffff');

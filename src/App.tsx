@@ -14,8 +14,9 @@ import {
 import { DEFAULT_SETTINGS } from './config/themes';
 import { chimeAudio } from './utils/audio';
 
-const SETTINGS_STORAGE_KEY = 'christmas_tree_settings_v6';
+const SETTINGS_STORAGE_KEY = 'christmas_tree_settings_v7';
 const PREVIOUS_SETTINGS_STORAGE_KEYS = [
+  'christmas_tree_settings_v6',
   'christmas_tree_settings_v5',
   'christmas_tree_settings_v4',
   'christmas_tree_settings_v3',
