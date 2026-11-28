@@ -513,9 +513,16 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
       key: '',
       canvas: null,
     });
-    const starCacheRef = useRef<{ key: string; canvas: HTMLCanvasElement | null }>({
+    const starCacheRef = useRef<{
+      key: string;
+      haloCanvas: HTMLCanvasElement | null;
+      bodyCanvas: HTMLCanvasElement | null;
+      radius: number;
+    }>({
       key: '',
-      canvas: null,
+      haloCanvas: null,
+      bodyCanvas: null,
+      radius: 0,
     });
     const greetingCacheRef = useRef<{
       key: string;
@@ -1830,78 +1837,222 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         ctx.restore();
       }
 
-      const starAppearDuration = 0.2;
+      const starAppearDuration = 0.35;
       const starReveal = Math.max(0, Math.min(1, (starSequenceTime - gatherDuration) / starAppearDuration));
       if (frameSettings.showStar && frameSettings.treeState === 'formed' && starReveal > 0) {
-        const starKey = `${frameTheme.id}:${Math.round(focal / 40)}`;
+        const starKey = `v2:${frameTheme.id}:${Math.round(focal / 40)}`;
         if (starCacheRef.current.key !== starKey) {
-          const R = focal * (frameTheme.id === 'snowglobe' ? 0.14 : 0.22);
-          const rayLen = focal * (frameTheme.id === 'snowglobe' ? 0.12 : 0.28);
-          const pad = Math.ceil(Math.max(R, rayLen) + 32);
-          const sCv = document.createElement('canvas');
-          sCv.width = pad * 2;
-          sCv.height = pad * 2;
-          const sCtx = sCv.getContext('2d');
-          if (sCtx) {
-            sCtx.translate(pad, pad);
-            const gStar = sCtx.createRadialGradient(0, 0, 0, 0, 0, R);
+          const sr = focal * (frameTheme.id === 'snowglobe' ? 0.056 : 0.052);
+          const haloR = sr * 3.4;
+          const rayLen = sr * 2.9;
+          const haloPad = Math.ceil(Math.max(haloR, rayLen) + 24);
+
+          // 1. Pre-rendered Celestial Aura & Rotating Soft Rays Canvas
+          const haloCv = document.createElement('canvas');
+          haloCv.width = haloPad * 2;
+          haloCv.height = haloPad * 2;
+          const hCtx = haloCv.getContext('2d');
+          if (hCtx) {
+            hCtx.translate(haloPad, haloPad);
+            const gStar = hCtx.createRadialGradient(0, 0, 0, 0, 0, haloR);
             gStar.addColorStop(0, frameTheme.star.inner);
-            gStar.addColorStop(0.12, frameTheme.star.mid);
-            gStar.addColorStop(0.4, frameTheme.star.outer);
+            gStar.addColorStop(0.16, frameTheme.star.mid);
+            gStar.addColorStop(0.45, frameTheme.star.outer);
             gStar.addColorStop(1, 'rgba(0,0,0,0)');
-            sCtx.fillStyle = gStar;
-            sCtx.beginPath();
-            sCtx.arc(0, 0, R, 0, TAU);
-            sCtx.fill();
+            hCtx.fillStyle = gStar;
+            hCtx.beginPath();
+            hCtx.arc(0, 0, haloR, 0, TAU);
+            hCtx.fill();
 
-            for (let i = 0; i < 10; i++) {
-              sCtx.save();
-              sCtx.rotate((i * Math.PI) / 5);
-              const len = rayLen * (i % 2 === 0 ? 1 : 0.62);
-              const lg = sCtx.createLinearGradient(0, 0, len, 0);
-              lg.addColorStop(0, 'rgba(255,255,255,0.95)');
-              lg.addColorStop(1, 'rgba(255,255,255,0)');
-              sCtx.fillStyle = lg;
-              sCtx.beginPath();
-              sCtx.moveTo(0, -3.6);
-              sCtx.lineTo(len, 0);
-              sCtx.lineTo(0, 3.6);
-              sCtx.closePath();
-              sCtx.fill();
-              sCtx.restore();
+            // 8 delicate, wispy celestial light rays (alternating long & short)
+            for (let i = 0; i < 8; i++) {
+              hCtx.save();
+              hCtx.rotate((i * Math.PI) / 4);
+              const len = rayLen * (i % 2 === 0 ? 1.0 : 0.62);
+              const halfBase = i % 2 === 0 ? 3.2 : 2.0;
+              const lg = hCtx.createLinearGradient(0, 0, len, 0);
+              lg.addColorStop(0, 'rgba(255,252,235,0.85)');
+              lg.addColorStop(0.35, 'rgba(255,224,135,0.42)');
+              lg.addColorStop(1, 'rgba(255,210,110,0)');
+              hCtx.fillStyle = lg;
+              hCtx.beginPath();
+              hCtx.moveTo(0, -halfBase);
+              hCtx.lineTo(len, 0);
+              hCtx.lineTo(0, halfBase);
+              hCtx.closePath();
+              hCtx.fill();
+              hCtx.restore();
             }
-
-            const sr = focal * (frameTheme.id === 'snowglobe' ? 0.05 : 0.042);
-            sCtx.beginPath();
-            for (let k = 0; k < 10; k++) {
-              const r = k % 2 === 0 ? sr : sr * 0.42;
-              const a = (k * Math.PI) / 5 - Math.PI / 2;
-              const sx = Math.cos(a) * r;
-              const sy = Math.sin(a) * r;
-              if (k === 0) sCtx.moveTo(sx, sy);
-              else sCtx.lineTo(sx, sy);
-            }
-            sCtx.closePath();
-            sCtx.fillStyle = frameTheme.star.star;
-            sCtx.shadowColor = frameTheme.star.glow;
-            sCtx.shadowBlur = frameTheme.id === 'snowglobe' ? 22 : 36;
-            sCtx.fill();
           }
-          starCacheRef.current = { key: starKey, canvas: sCv };
+
+          // 2. Pre-rendered Upright 3D Faceted Golden Crystal Star Body Canvas
+          const bodyPad = Math.ceil(sr * 1.9 + 28);
+          const bodyCv = document.createElement('canvas');
+          bodyCv.width = bodyPad * 2;
+          bodyCv.height = bodyPad * 2;
+          const bCtx = bodyCv.getContext('2d');
+          if (bCtx) {
+            bCtx.translate(bodyPad, bodyPad);
+
+            // Soft golden drop glow behind the 3D star body
+            bCtx.save();
+            bCtx.shadowColor = frameTheme.star.glow;
+            bCtx.shadowBlur = 24;
+            bCtx.fillStyle = frameTheme.star.star;
+            bCtx.beginPath();
+            for (let k = 0; k < 10; k++) {
+              const r = k % 2 === 0 ? sr : sr * 0.38;
+              const a = (k * Math.PI) / 5 - Math.PI / 2;
+              if (k === 0) bCtx.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+              else bCtx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+            }
+            bCtx.closePath();
+            bCtx.fill();
+            bCtx.restore();
+
+            // Delicate miniature secondary starburst rays nestled between the 5 main arms
+            for (let i = 0; i < 5; i++) {
+              const midAngle = ((i * 2 + 1) * Math.PI) / 5 - Math.PI / 2;
+              const tipR = sr * 0.62;
+              const sideSpread = 0.14;
+              bCtx.fillStyle = 'rgba(255, 236, 175, 0.72)';
+              bCtx.beginPath();
+              bCtx.moveTo(0, 0);
+              bCtx.lineTo(Math.cos(midAngle - sideSpread) * sr * 0.24, Math.sin(midAngle - sideSpread) * sr * 0.24);
+              bCtx.lineTo(Math.cos(midAngle) * tipR, Math.sin(midAngle) * tipR);
+              bCtx.lineTo(Math.cos(midAngle + sideSpread) * sr * 0.24, Math.sin(midAngle + sideSpread) * sr * 0.24);
+              bCtx.closePath();
+              bCtx.fill();
+            }
+
+            // 10 Sculpted 3D Beveled Facets (bright champagne left facet + warm burnished gold right facet!)
+            const innerR = sr * 0.38;
+            for (let i = 0; i < 5; i++) {
+              const tipA = (i * 2 * Math.PI) / 5 - Math.PI / 2;
+              const prevValleyA = ((i * 2 - 1) * Math.PI) / 5 - Math.PI / 2;
+              const nextValleyA = ((i * 2 + 1) * Math.PI) / 5 - Math.PI / 2;
+
+              const tipX = Math.cos(tipA) * sr;
+              const tipY = Math.sin(tipA) * sr;
+              const prevX = Math.cos(prevValleyA) * innerR;
+              const prevY = Math.sin(prevValleyA) * innerR;
+              const nextX = Math.cos(nextValleyA) * innerR;
+              const nextY = Math.sin(nextValleyA) * innerR;
+
+              // Left Lit Facet (luminous ivory -> champagne gold)
+              const lightGrad = bCtx.createLinearGradient(0, 0, tipX, tipY);
+              lightGrad.addColorStop(0, '#ffffff');
+              lightGrad.addColorStop(0.45, '#fef08a');
+              lightGrad.addColorStop(1, '#f59e0b');
+              bCtx.fillStyle = lightGrad;
+              bCtx.beginPath();
+              bCtx.moveTo(0, 0);
+              bCtx.lineTo(prevX, prevY);
+              bCtx.lineTo(tipX, tipY);
+              bCtx.closePath();
+              bCtx.fill();
+
+              // Right Shaded Facet (rich burnished gold -> deep amber shadow for real 3D depth!)
+              const shadeGrad = bCtx.createLinearGradient(0, 0, tipX, tipY);
+              shadeGrad.addColorStop(0, '#fcd34d');
+              shadeGrad.addColorStop(0.55, '#d97706');
+              shadeGrad.addColorStop(1, '#92400e');
+              bCtx.fillStyle = shadeGrad;
+              bCtx.beginPath();
+              bCtx.moveTo(0, 0);
+              bCtx.lineTo(tipX, tipY);
+              bCtx.lineTo(nextX, nextY);
+              bCtx.closePath();
+              bCtx.fill();
+
+              // Razor-sharp specular metallic ridge highlight along each arm
+              bCtx.strokeStyle = 'rgba(255, 255, 245, 0.85)';
+              bCtx.lineWidth = 1.1;
+              bCtx.beginPath();
+              bCtx.moveTo(0, 0);
+              bCtx.lineTo(tipX, tipY);
+              bCtx.stroke();
+            }
+
+            // Crisp bright gold outer rim bevel
+            bCtx.strokeStyle = 'rgba(255, 248, 210, 0.75)';
+            bCtx.lineWidth = 1.1;
+            bCtx.beginPath();
+            for (let k = 0; k < 10; k++) {
+              const r = k % 2 === 0 ? sr : innerR;
+              const a = (k * Math.PI) / 5 - Math.PI / 2;
+              if (k === 0) bCtx.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+              else bCtx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+            }
+            bCtx.closePath();
+            bCtx.stroke();
+
+            // Pure white crystal core brilliance at the 3D apex
+            const coreGrad = bCtx.createRadialGradient(0, 0, 0, 0, 0, sr * 0.42);
+            coreGrad.addColorStop(0, 'rgba(255,255,255,1)');
+            coreGrad.addColorStop(0.45, 'rgba(255,250,220,0.68)');
+            coreGrad.addColorStop(1, 'rgba(255,220,130,0)');
+            bCtx.fillStyle = coreGrad;
+            bCtx.beginPath();
+            bCtx.arc(0, 0, sr * 0.42, 0, TAU);
+            bCtx.fill();
+          }
+
+          starCacheRef.current = {
+            key: starKey,
+            haloCanvas: haloCv,
+            bodyCanvas: bodyCv,
+            radius: sr,
+          };
         }
 
-        const starCanvas = starCacheRef.current.canvas;
-        if (starCanvas) {
-          const appearScale = 0.2 + 0.8 * (1 - Math.pow(1 - starReveal, 3));
-          const pStar = projectFrame(0, 7.7, 0);
-          const pulse = (1 + 0.12 * Math.sin(time * 3.2)) * zoomRef.current;
+        const { haloCanvas, bodyCanvas, radius: starR } = starCacheRef.current;
+        if (haloCanvas && bodyCanvas) {
+          const appearScale = 0.25 + 0.75 * (1 - Math.pow(1 - starReveal, 3));
+          // Positioned cleanly crowning the apex of the pine tree
+          const pStar = projectFrame(0, 6.85, 0);
+          const breathePulse = (1 + 0.06 * Math.sin(time * 2.6)) * zoomRef.current;
+          const haloPulse = (1 + 0.14 * Math.sin(time * 2.2)) * zoomRef.current;
+          const gentleSway = Math.sin(time * 1.1) * 0.045; // noble upright sway (~2.5°), never spinning upside-down!
+
+          // Pass 1: Slowly turning celestial glow & wispy rays behind the star
           ctx.save();
           ctx.globalCompositeOperation = 'lighter';
+          ctx.globalAlpha = starReveal * (0.82 + 0.18 * Math.sin(time * 3.1));
+          ctx.translate(pStar.x, pStar.y);
+          ctx.rotate(time * 0.14);
+          ctx.scale(haloPulse * appearScale, haloPulse * appearScale);
+          ctx.drawImage(haloCanvas, -haloCanvas.width / 2, -haloCanvas.height / 2);
+          ctx.restore();
+
+          // Pass 2: Upright 3D faceted golden jewel star body
+          ctx.save();
+          ctx.globalCompositeOperation = 'source-over';
           ctx.globalAlpha = starReveal;
           ctx.translate(pStar.x, pStar.y);
-          ctx.rotate(time * 0.22);
-          ctx.scale(pulse * appearScale, pulse * appearScale);
-          ctx.drawImage(starCanvas, -starCanvas.width / 2, -starCanvas.height / 2);
+          ctx.rotate(gentleSway);
+          ctx.scale(breathePulse * appearScale, breathePulse * appearScale);
+          ctx.drawImage(bodyCanvas, -bodyCanvas.width / 2, -bodyCanvas.height / 2);
+
+          // Pass 3: Live twinkling diamond glints dancing on two star tips!
+          if (diamondStarSprite) {
+            ctx.globalCompositeOperation = 'lighter';
+            const glintA = Math.pow(Math.max(0, Math.sin(time * 2.4)), 6);
+            if (glintA > 0.12) {
+              const gSz = starR * (0.75 + 0.55 * glintA);
+              ctx.globalAlpha = starReveal * 0.92 * glintA;
+              ctx.drawImage(diamondStarSprite, -gSz / 2, -starR - gSz / 2, gSz, gSz);
+            }
+            const glintB = Math.pow(Math.max(0, Math.sin(time * 2.1 + 2.2)), 6);
+            if (glintB > 0.12) {
+              const rightTipA = (2 * Math.PI) / 5 - Math.PI / 2;
+              const rx = Math.cos(rightTipA) * starR;
+              const ry = Math.sin(rightTipA) * starR;
+              const gSz = starR * (0.65 + 0.45 * glintB);
+              ctx.globalAlpha = starReveal * 0.85 * glintB;
+              ctx.drawImage(diamondStarSprite, rx - gSz / 2, ry - gSz / 2, gSz, gSz);
+            }
+          }
           ctx.restore();
         }
       }
