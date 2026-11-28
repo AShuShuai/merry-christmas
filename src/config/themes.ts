@@ -193,7 +193,7 @@ export const THEMES: Record<ThemeId, Theme> = {
 
 export const DEFAULT_SETTINGS: TreeSettings = {
   themeId: 'snowglobe',
-  totalPoints: 3600,
+  totalPoints: 1800,
   strings: 3,
   turns: 27,
   rotationSpeed: 0.35,
@@ -208,10 +208,10 @@ export const DEFAULT_SETTINGS: TreeSettings = {
   showMeteors: true,
   showGroundGlow: true,
   showOrbits: true,
-  orbitCount: 520,
-  petalCount: 90,
-  meteorCount: 4,
-  sparkleCount: 150,
+  orbitCount: 160,
+  petalCount: 36,
+  meteorCount: 3,
+  sparkleCount: 65,
   musicEnabled: false,
   showPhotos: true,
   photos: DEFAULT_PHOTOS,

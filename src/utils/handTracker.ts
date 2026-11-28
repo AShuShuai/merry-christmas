@@ -47,6 +47,7 @@ class HandTrackerEngine {
 
   private videoEl: HTMLVideoElement | null = null;
   private canvasEl: HTMLCanvasElement | null = null;
+  private canvasCtx: CanvasRenderingContext2D | null = null;
   private onGestureCallback: GestureCallback | null = null;
 
   private lastHandX: number | null = null;
@@ -60,6 +61,11 @@ class HandTrackerEngine {
   private pinchReleaseFrames: number = 0;
   private smoothDeltaX: number = 0;
   private smoothDeltaY: number = 0;
+  private lastEmittedHasHand: boolean = false;
+  private lastEmittedGesture: HandGestureState['gesture'] = 'none';
+  private lastEmittedPinching: boolean = false;
+  private lastEmittedCursorX: number = -1;
+  private lastEmittedCursorY: number = -1;
 
   public init(
     video: HTMLVideoElement,
@@ -100,9 +106,11 @@ class HandTrackerEngine {
     const generation = ++this.generation;
     this.videoEl = video;
     this.canvasEl = canvas;
+    this.canvasCtx = canvas.getContext('2d');
     this.onGestureCallback = onGesture;
     this.lastVideoTime = -1;
     this.lastInferenceTime = 0;
+    this.lastEmittedHasHand = false;
 
     try {
       if (!this.handLandmarker) {
@@ -129,9 +137,9 @@ class HandTrackerEngine {
 
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
-          width: { ideal: 640 },
-          height: { ideal: 480 },
-          frameRate: { ideal: 30, max: 30 },
+          width: { ideal: 320 },
+          height: { ideal: 240 },
+          frameRate: { ideal: 15, max: 20 },
           facingMode: 'user',
         },
       });
@@ -197,25 +205,36 @@ class HandTrackerEngine {
     this.lastInferenceTime = 0;
     this.smoothDeltaX = 0;
     this.smoothDeltaY = 0;
+    this.lastEmittedHasHand = false;
+    this.lastEmittedGesture = 'none';
+    this.lastEmittedPinching = false;
+    this.lastEmittedCursorX = -1;
+    this.lastEmittedCursorY = -1;
+    this.canvasCtx = null;
   }
 
   private startLoop() {
     const loop = () => {
       if (!this.isRunning || !this.videoEl || !this.handLandmarker) return;
 
-      const nowInMs = performance.now();
-      if (
-        this.videoEl.readyState >= 2 &&
-        this.videoEl.currentTime !== this.lastVideoTime &&
-        nowInMs - this.lastInferenceTime >= 1000 / 30
-      ) {
-        this.lastVideoTime = this.videoEl.currentTime;
-        this.lastInferenceTime = nowInMs;
-        const results: HandLandmarkerResult = this.handLandmarker.detectForVideo(
-          this.videoEl,
-          nowInMs
-        );
-        this.processResults(results);
+      // Skip all webcam AI inference when browser tab is hidden
+      if (!document.hidden) {
+        const nowInMs = performance.now();
+        // Adaptive inference throttling: ~16 FPS when hand is active, ~8 FPS when idle
+        const minIntervalMs = this.lastEmittedHasHand ? 62 : 125;
+        if (
+          this.videoEl.readyState >= 2 &&
+          this.videoEl.currentTime !== this.lastVideoTime &&
+          nowInMs - this.lastInferenceTime >= minIntervalMs
+        ) {
+          this.lastVideoTime = this.videoEl.currentTime;
+          this.lastInferenceTime = nowInMs;
+          const results: HandLandmarkerResult = this.handLandmarker.detectForVideo(
+            this.videoEl,
+            nowInMs
+          );
+          this.processResults(results);
+        }
       }
 
       this.animFrameId = requestAnimationFrame(loop);
@@ -226,15 +245,20 @@ class HandTrackerEngine {
 
   private processResults(results: HandLandmarkerResult) {
     if (!this.canvasEl || !this.videoEl) return;
-    const ctx = this.canvasEl.getContext('2d');
+    const ctx = this.canvasCtx ?? this.canvasEl.getContext('2d');
     if (!ctx) return;
+    this.canvasCtx = ctx;
 
     const w = this.canvasEl.width;
     const h = this.canvasEl.height;
-    ctx.clearRect(0, 0, w, h);
 
     if (!results.landmarks || results.landmarks.length === 0) {
-      // No hand detected
+      // No hand detected: avoid redundant React re-renders & canvas clears if already idle!
+      if (!this.lastEmittedHasHand) {
+        return;
+      }
+
+      ctx.clearRect(0, 0, w, h);
       this.lastHandX = null;
       this.lastHandY = null;
       this.smoothCursorX = null;
@@ -246,6 +270,11 @@ class HandTrackerEngine {
       this.pinchReleaseFrames = 0;
       this.smoothDeltaX = 0;
       this.smoothDeltaY = 0;
+      this.lastEmittedHasHand = false;
+      this.lastEmittedGesture = 'none';
+      this.lastEmittedPinching = false;
+      this.lastEmittedCursorX = 0.5;
+      this.lastEmittedCursorY = 0.5;
 
       this.onGestureCallback?.({
         hasHand: false,
@@ -260,6 +289,7 @@ class HandTrackerEngine {
       return;
     }
 
+    ctx.clearRect(0, 0, w, h);
     const landmarks = results.landmarks[0];
 
     // Landmark references:
@@ -276,10 +306,13 @@ class HandTrackerEngine {
     const ringTip = landmarks[16];
     const pinkyTip = landmarks[20];
 
-    // Screen cursor coords (Mirroring X for intuitive selfie interaction)
-    const rawCursorX = 1 - (indexTip.x + thumb.x) / 2;
-    const rawCursorY = (indexTip.y + thumb.y) / 2;
-    const cursorSmoothing = 0.48;
+    // Ergonomic active-zone mapping: maps comfortable central webcam zone [0.16..0.84] x [0.14..0.86]
+    // onto full [0..1] screen coordinates so user can effortlessly reach photos on both sides!
+    const rawMirrorX = 1 - (indexTip.x + thumb.x) / 2;
+    const rawMirrorY = (indexTip.y + thumb.y) / 2;
+    const rawCursorX = clamp01((rawMirrorX - 0.16) / 0.68);
+    const rawCursorY = clamp01((rawMirrorY - 0.14) / 0.72);
+    const cursorSmoothing = 0.55;
     this.smoothCursorX = this.smoothCursorX === null
       ? rawCursorX
       : this.smoothCursorX + (rawCursorX - this.smoothCursorX) * cursorSmoothing;
@@ -331,7 +364,7 @@ class HandTrackerEngine {
     const fingersClosed = extensions.every((extension) => extension < 0.36);
     const otherFingersCurled = otherFingersAverage < 0.34;
     const pinchCandidate =
-      normalizedPinchDistance < 0.42 &&
+      normalizedPinchDistance < 0.46 &&
       !otherFingersCurled;
     const isFist = fingersClosed && !pinchCandidate;
 
@@ -344,9 +377,9 @@ class HandTrackerEngine {
       const now = performance.now();
       if (pinchCandidate) this.pinchLastStrictTime = now;
       const remainsPinched =
-        normalizedPinchDistance < 0.58 &&
+        normalizedPinchDistance < 0.60 &&
         !otherFingersCurled &&
-        now - this.pinchLastStrictTime <= 180;
+        now - this.pinchLastStrictTime <= 200;
       this.pinchReleaseFrames = remainsPinched ? 0 : this.pinchReleaseFrames + 1;
       if (this.pinchReleaseFrames >= 2) {
         this.isPinching = false;
@@ -357,7 +390,8 @@ class HandTrackerEngine {
       this.pinchStartFrames = pinchCandidate
         ? this.pinchStartFrames + 1
         : 0;
-      if (this.pinchStartFrames >= 2) {
+      // Trigger pinch quickly (1 frame if tightly pinched, 2 frames if borderline)
+      if (this.pinchStartFrames >= 2 || (pinchCandidate && normalizedPinchDistance < 0.34)) {
         this.isPinching = true;
         this.pinchLastStrictTime = performance.now();
         this.pinchStartFrames = 0;
@@ -377,6 +411,26 @@ class HandTrackerEngine {
 
     // Draw Skeleton on PIP Canvas
     this.drawSkeleton(ctx, landmarks, w, h, isPinching);
+
+    // Avoid redundant React state updates if hand hasn't moved or changed gesture
+    const cursorMoved =
+      Math.abs(cursorX - this.lastEmittedCursorX) >= 0.003 ||
+      Math.abs(cursorY - this.lastEmittedCursorY) >= 0.003;
+    const stateChanged =
+      !this.lastEmittedHasHand ||
+      gesture !== this.lastEmittedGesture ||
+      isPinching !== this.lastEmittedPinching ||
+      cursorMoved ||
+      deltaX !== 0 ||
+      deltaY !== 0;
+
+    if (!stateChanged) return;
+
+    this.lastEmittedHasHand = true;
+    this.lastEmittedGesture = gesture;
+    this.lastEmittedPinching = isPinching;
+    this.lastEmittedCursorX = cursorX;
+    this.lastEmittedCursorY = cursorY;
 
     // Emit state
     this.onGestureCallback?.({

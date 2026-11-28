@@ -1,6 +1,5 @@
 import React, { useEffect, useRef } from 'react';
 import { MemoryPhoto, HandGestureState, PhotoTransitionOrigin } from '../types';
-import { project } from '../engine/projection';
 import { chimeAudio } from '../utils/audio';
 
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
@@ -43,14 +42,14 @@ interface Props {
   onRequestClosePhoto: () => void;
 }
 
-export const FloatingPhotosOverlay: React.FC<Props> = ({
+export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
   photos,
   selectedPhotoId,
-  yaw,
-  pitch,
+  yaw: _yaw,
+  pitch: _pitch,
   width,
   height,
-  focal,
+  focal: _focal,
   scatter = 0,
   introProgress,
   treeIsDispersed: _treeIsDispersed,
@@ -63,31 +62,20 @@ export const FloatingPhotosOverlay: React.FC<Props> = ({
   onRequestClosePhoto,
 }) => {
   const pinchOpenDistanceRef = useRef<number | null>(null);
+  const wasPinchingRef = useRef<boolean>(false);
   const photoCardElementsRef = useRef<Map<string, HTMLDivElement>>(new Map());
   const photoOrbitPositionsRef = useRef<Map<string, OrbitPosition>>(new Map());
   const photoIdsRef = useRef('');
   const frameStateRef = useRef({
     lastTime: performance.now(),
     orbitTime: 0,
-    yaw,
-    pitch,
   });
   const frameState = frameStateRef.current;
   const now = performance.now();
   const deltaTime = Math.min(0.05, Math.max(0, (now - frameState.lastTime) / 1000));
   frameState.lastTime = now;
   frameState.orbitTime += deltaTime;
-  const yawDelta = Math.atan2(
-    Math.sin(yaw - frameState.yaw),
-    Math.cos(yaw - frameState.yaw)
-  );
-  const damping = 1 - Math.exp(-deltaTime * 8);
-  frameState.yaw += yawDelta * damping;
-  frameState.pitch += (pitch - frameState.pitch) * damping;
   const orbitTime = frameState.orbitTime;
-  const smoothedYaw = frameState.yaw;
-  const smoothedPitch = frameState.pitch;
-  const orbitSpeed = 0.065;
 
   const cursorScreenX = gestureState.cursorX * width;
   const cursorScreenY = gestureState.cursorY * height;
@@ -111,37 +99,37 @@ export const FloatingPhotosOverlay: React.FC<Props> = ({
     photoIdsRef.current = photoIds;
   }
 
-  const cardBaseWidth = width < 640 ? 80 : 96;
-  const rawProjectedCards = photos.map((photo) => {
+  const cardBaseWidth = width < 640 ? 92 : 112;
+  const leftPhotos = photos.filter((_, idx) => idx % 2 === 0);
+  const rightPhotos = photos.filter((_, idx) => idx % 2 === 1);
+
+  const rawProjectedCards = photos.map((photo, index) => {
     const position = photoOrbitPositionsRef.current.get(photo.id)!;
-    const angle = orbitTime * orbitSpeed - smoothedYaw;
-    const cosAngle = Math.cos(angle);
-    const sinAngle = Math.sin(angle);
-    const orbitX = position.x * cosAngle - position.y * sinAngle;
-    const orbitY = position.x * sinAngle + position.y * cosAngle;
-    const bob = Math.sin(orbitTime * 0.8 + position.phase) * 0.025;
-    const orbitZ = Math.sin(angle + position.phase);
+    const isLeftSide = index % 2 === 0;
+    const sideList = isLeftSide ? leftPhotos : rightPhotos;
+    const sideIdx = sideList.indexOf(photo);
+    const sideCount = Math.max(1, sideList.length);
 
-    // Lateral flank placement: keeps photo polaroids strictly on left & right sides, NEVER occluding Chiara's face, hair, or shoulders!
-    const isLeftSide = orbitX < 0;
-    const flankBaseX = isLeftSide ? width * 0.14 : width * 0.86;
-    const flankSpreadX = (Math.abs(orbitX) - 0.5) * (width * 0.08);
-    const screenX = isLeftSide ? flankBaseX - flankSpreadX : flankBaseX + flankSpreadX;
-    const screenY = height * 0.48 + (orbitY * 0.85 + bob) * (height * 0.22);
+    // Stable, evenly distributed vertical slots on left & right flanks (NEVER teleports, NEVER overlaps face!)
+    // Positioned closer to center (24% and 76% width) so webcam hand cursor reaches them effortlessly!
+    const tY = sideCount === 1 ? 0.5 : sideIdx / (sideCount - 1);
+    const arcCurve = Math.sin(tY * Math.PI); // subtle gentle outward curve in the middle
+    const swayX = Math.sin(orbitTime * 0.65 + position.phase) * Math.min(18, width * 0.016);
+    const swayY = Math.cos(orbitTime * 0.75 + position.phase * 1.3) * 11;
 
-    const effRadius = (photo.radius + 2.5) * (1 + scatter * 0.4);
-    const proj = project(
-      orbitX * effRadius,
-      (orbitY + bob) * effRadius,
-      orbitZ * effRadius,
-      smoothedYaw,
-      smoothedPitch,
-      width,
-      height,
-      focal
-    );
+    const baseFlankX = isLeftSide
+      ? width * (0.255 - arcCurve * 0.03)
+      : width * (0.745 + arcCurve * 0.03);
+    const screenX = baseFlankX + swayX;
+    const minY = height * 0.25;
+    const maxY = height * 0.68;
+    const screenY = minY + tY * (maxY - minY) + swayY;
 
-    return { photo, proj, screenX, screenY };
+    const orbitX = isLeftSide ? -0.8 : 0.8;
+    const orbitY = (tY - 0.5) * 1.2;
+    const proj = { x: screenX, y: screenY, z: 2.5 - Math.abs(orbitY), scale: 1 };
+
+    return { photo, proj, screenX, screenY, orbitX, orbitY };
   });
   const nearestSpacing = new Map<string, number>();
   rawProjectedCards.forEach((card, index) => {
@@ -158,19 +146,23 @@ export const FloatingPhotosOverlay: React.FC<Props> = ({
   const projectedCards = rawProjectedCards.map((card) => {
     const spacing = nearestSpacing.get(card.photo.id) ?? Number.POSITIVE_INFINITY;
     const scale = Math.min(
-      0.58,
-      Number.isFinite(spacing) ? (spacing * 0.58) / cardBaseWidth : 0.58
+      0.84,
+      Number.isFinite(spacing) ? (spacing * 0.66) / cardBaseWidth : 0.84
     );
     const cardWidth = cardBaseWidth * scale;
-    const isFront = card.proj.z > -3.5;
+    const isFront = true;
+    const cursorDist = Math.hypot(card.screenX - cursorScreenX, card.screenY - cursorScreenY);
+    // Generous magnetic hitbox so grabbing photos with webcam pinch is effortless
     const isUnderCursor =
-      Math.abs(card.screenX - cursorScreenX) <= cardWidth * 0.9 &&
-      Math.abs(card.screenY - cursorScreenY) <= cardWidth * 0.85 + 18;
+      Math.abs(card.screenX - cursorScreenX) <= cardWidth * 1.15 &&
+      Math.abs(card.screenY - cursorScreenY) <= cardWidth * 1.05 + 24;
 
-    return { ...card, scale, isFront, isUnderCursor };
+    return { ...card, scale, isFront, isUnderCursor, cursorDist };
   }).sort((a, b) => a.proj.z - b.proj.z);
   const photoUnderCursorCard =
-    [...projectedCards].reverse().find((card) => card.isUnderCursor) ?? null;
+    projectedCards
+      .filter((card) => card.isUnderCursor)
+      .sort((a, b) => a.cursorDist - b.cursorDist)[0] ?? null;
   const photoUnderCursor = photoUnderCursorCard?.photo ?? null;
   const selectedCard = projectedCards.find((card) => card.photo.id === selectedPhotoId);
 
@@ -205,13 +197,14 @@ export const FloatingPhotosOverlay: React.FC<Props> = ({
 
     if (!gestureState.hasHand) {
       pinchOpenDistanceRef.current = null;
+      wasPinchingRef.current = false;
       return;
     }
 
     if (
       !isPinching &&
       gestureState.gesture !== 'fist' &&
-      gestureState.pinchDistance > 0.25
+      gestureState.pinchDistance > 0.22
     ) {
       pinchOpenDistanceRef.current = Math.max(
         pinchOpenDistanceRef.current ?? 0,
@@ -219,11 +212,15 @@ export const FloatingPhotosOverlay: React.FC<Props> = ({
       );
     }
 
+    const risingEdgePinch = isPinching && !wasPinchingRef.current;
+    wasPinchingRef.current = isPinching;
+
     const closedWithMotion =
-      isPinching &&
-      pinchOpenDistanceRef.current !== null &&
-      pinchOpenDistanceRef.current - gestureState.pinchDistance >=
-        Math.max(0.04, pinchOpenDistanceRef.current * 0.08);
+      risingEdgePinch ||
+      (isPinching &&
+        pinchOpenDistanceRef.current !== null &&
+        pinchOpenDistanceRef.current - gestureState.pinchDistance >=
+          Math.max(0.035, pinchOpenDistanceRef.current * 0.07));
 
     if (closedWithMotion) {
       pinchOpenDistanceRef.current = null;
@@ -324,7 +321,7 @@ export const FloatingPhotosOverlay: React.FC<Props> = ({
             : depthOpacity * photoVisibility;
 
         const isHoveredByHand = gestureState.hasHand && isUnderCursor && isFront;
-        const scale = isHoveredByHand ? baseScale * 1.12 : baseScale;
+        const scale = isHoveredByHand ? baseScale * 1.18 : baseScale;
 
         return (
           <div
@@ -374,4 +371,4 @@ export const FloatingPhotosOverlay: React.FC<Props> = ({
       })}
     </div>
   );
-};
+});

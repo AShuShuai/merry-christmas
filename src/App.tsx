@@ -14,8 +14,9 @@ import {
 import { DEFAULT_SETTINGS } from './config/themes';
 import { chimeAudio } from './utils/audio';
 
-const SETTINGS_STORAGE_KEY = 'christmas_tree_settings_v8';
+const SETTINGS_STORAGE_KEY = 'christmas_tree_settings_v9';
 const PREVIOUS_SETTINGS_STORAGE_KEYS = [
+  'christmas_tree_settings_v8',
   'christmas_tree_settings_v7',
   'christmas_tree_settings_v6',
   'christmas_tree_settings_v5',
@@ -144,6 +145,12 @@ export const App: React.FC = () => {
           return {
             ...DEFAULT_SETTINGS,
             ...savedSettings,
+            // Enforce optimized lightweight particle budgets when upgrading from older settings
+            totalPoints: DEFAULT_SETTINGS.totalPoints,
+            orbitCount: DEFAULT_SETTINGS.orbitCount,
+            petalCount: DEFAULT_SETTINGS.petalCount,
+            sparkleCount: DEFAULT_SETTINGS.sparkleCount,
+            meteorCount: DEFAULT_SETTINGS.meteorCount,
             themeId: savedSettings.themeId === 'frozen' ? DEFAULT_SETTINGS.themeId : savedSettings.themeId,
             treeState: 'formed',
           };

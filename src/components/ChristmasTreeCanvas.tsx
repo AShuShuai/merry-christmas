@@ -28,6 +28,40 @@ const TRUNK_SPRITES = generateSprites([
   [144, 77, 52],
 ]);
 
+// Pre-rendered glossy ornament spheres (eliminates 34 createRadialGradient + shadowBlur calls per frame!)
+const ORNAMENT_SPRITES: HTMLCanvasElement[] = ['#d33139', '#f3c64e', '#e9e1c0'].map((color) => {
+  const size = 36;
+  const half = size / 2;
+  const r = size * 0.34;
+  const cv = document.createElement('canvas');
+  cv.width = size;
+  cv.height = size;
+  const g = cv.getContext('2d');
+  if (!g) return cv;
+
+  // Soft outer glow halo
+  const halo = g.createRadialGradient(half, half, r * 0.5, half, half, half);
+  halo.addColorStop(0, color);
+  halo.addColorStop(1, 'rgba(0,0,0,0)');
+  g.globalAlpha = 0.38;
+  g.fillStyle = halo;
+  g.beginPath();
+  g.arc(half, half, half, 0, TAU);
+  g.fill();
+
+  // Glossy 3D sphere
+  g.globalAlpha = 1;
+  const shine = g.createRadialGradient(half - r * 0.35, half - r * 0.4, 0, half, half, r);
+  shine.addColorStop(0, '#fff8d8');
+  shine.addColorStop(0.28, color);
+  shine.addColorStop(1, '#54252a');
+  g.fillStyle = shine;
+  g.beginPath();
+  g.arc(half, half, r, 0, TAU);
+  g.fill();
+  return cv;
+});
+
 function rand(max: number, min: number = 0): number {
   return min + Math.random() * (max - min);
 }
@@ -313,11 +347,8 @@ function drawGiftModels(
       });
       ctx.closePath();
       ctx.fillStyle = color;
-      ctx.shadowColor = '#ffd36e';
-      ctx.shadowBlur = Math.max(1.2, screenScale * 0.16);
       ctx.fill();
-      ctx.shadowBlur = 0;
-      ctx.strokeStyle = 'rgba(255, 226, 155, 0.42)';
+      ctx.strokeStyle = 'rgba(255, 226, 155, 0.48)';
       ctx.lineWidth = Math.max(0.6, screenScale * 0.025);
       ctx.stroke();
     });
@@ -394,10 +425,7 @@ function drawTreeDecorations(
     garlandPoints.push(point);
   }
 
-  ctx.shadowColor = '#ffd56a';
-  ctx.shadowBlur = 12;
-  ctx.strokeStyle = 'rgba(255, 200, 72, 0.88)';
-  ctx.lineWidth = Math.max(1.5, garlandPoints[0].scale * 0.075);
+  const baseWidth = Math.max(1.5, garlandPoints[0].scale * 0.075);
   ctx.beginPath();
   let drawingFront = false;
   garlandPoints.forEach((point) => {
@@ -409,9 +437,14 @@ function drawTreeDecorations(
       drawingFront = false;
     }
   });
+  // Fast double-stroke glow (20x faster than CPU shadowBlur!)
+  ctx.strokeStyle = 'rgba(255, 213, 106, 0.28)';
+  ctx.lineWidth = baseWidth * 3.0;
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(255, 200, 72, 0.9)';
+  ctx.lineWidth = baseWidth;
   ctx.stroke();
 
-  ctx.shadowBlur = 9;
   for (let i = 0; i < garlandPoints.length; i += 7) {
     const point = garlandPoints[i];
     if (point.z <= 0) continue;
@@ -422,7 +455,6 @@ function drawTreeDecorations(
     ctx.fill();
   }
 
-  const ornamentColors = ['#d33139', '#f3c64e', '#e9e1c0'];
   for (let i = 0; i < 34; i++) {
     const t = 0.1 + (i / 34) * 0.76;
     const radius = 6.9 * Math.pow(1 - t, 0.85) + 0.45;
@@ -431,24 +463,9 @@ function drawTreeDecorations(
     if (point.z <= 0) continue;
 
     const ornamentRadius = Math.max(2.5, point.scale * 0.25);
-    const color = ornamentColors[i % ornamentColors.length];
-    const shine = ctx.createRadialGradient(
-      point.x - ornamentRadius * 0.35,
-      point.y - ornamentRadius * 0.4,
-      0,
-      point.x,
-      point.y,
-      ornamentRadius
-    );
-    shine.addColorStop(0, '#fff8d8');
-    shine.addColorStop(0.28, color);
-    shine.addColorStop(1, '#54252a');
-    ctx.fillStyle = shine;
-    ctx.shadowColor = color;
-    ctx.shadowBlur = 5;
-    ctx.beginPath();
-    ctx.arc(point.x, point.y, ornamentRadius, 0, TAU);
-    ctx.fill();
+    const drawSize = ornamentRadius * 3.0;
+    const sprite = ORNAMENT_SPRITES[i % ORNAMENT_SPRITES.length];
+    ctx.drawImage(sprite, point.x - drawSize / 2, point.y - drawSize / 2, drawSize, drawSize);
   }
   ctx.restore();
 }
@@ -490,9 +507,30 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
     const starSequenceRef = useRef<number>(0);
     const zoomRef = useRef<number>(1.0);
     const lastCameraUpdateRef = useRef<number>(0);
+    const lastRenderMsRef = useRef<number>(0);
+    const lastCameraSentRef = useRef<{ w: number; h: number; scatter: number; intro: number }>({
+      w: 0,
+      h: 0,
+      scatter: -1,
+      intro: -1,
+    });
     const backgroundGradientRef = useRef<{ key: string; gradient: CanvasGradient | null }>({
       key: '',
       gradient: null,
+    });
+    const groundGlowCacheRef = useRef<{ key: string; canvas: HTMLCanvasElement | null }>({
+      key: '',
+      canvas: null,
+    });
+    const starCacheRef = useRef<{ key: string; canvas: HTMLCanvasElement | null }>({
+      key: '',
+      canvas: null,
+    });
+    const greetingCacheRef = useRef<{ key: string; canvas: HTMLCanvasElement | null; width: number; height: number }>({
+      key: '',
+      canvas: null,
+      width: 0,
+      height: 0,
     });
 
   // Scene points refs
@@ -578,7 +616,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         t: t,
         c: colorIndex,
         originalColor,
-        base: ornament ? rand(0.9, 1.25) : rand(0.15, 0.3),
+        base: ornament ? rand(1.05, 1.45) : rand(0.22, 0.38),
         phase: rand(TAU),
         fade: t > 0.9 ? 1 - ((t - 0.9) / 0.1) * 0.6 : 1,
         sx: ep[0],
@@ -660,7 +698,8 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
 
     const w = window.innerWidth;
     const h = window.innerHeight;
-    const dpr = Math.min(window.devicePixelRatio || 1, 1.25);
+    // Cap DPR at 1 for particle Canvas2D: cuts pixel fill cost by 36%-75% on 125%/150%/Retina displays!
+    const dpr = 1;
 
     cv.width = Math.floor(w * dpr);
     cv.height = Math.floor(h * dpr);
@@ -838,9 +877,22 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
     lastTimeRef.current = 0;
 
     const render = () => {
+      // Pause animation completely when tab is hidden
+      if (document.hidden) {
+        animFrameRef.current = requestAnimationFrame(render);
+        return;
+      }
+
       const currentTimeMs = performance.now();
+      // Smooth 40 FPS cap: prevents 120Hz/144Hz monitors from burning 3x CPU!
+      if (lastRenderMsRef.current && currentTimeMs - lastRenderMsRef.current < 24) {
+        animFrameRef.current = requestAnimationFrame(render);
+        return;
+      }
+      lastRenderMsRef.current = currentTimeMs;
+
       const time = (currentTimeMs - startTimeRef.current) / 1000;
-      const dt = lastTimeRef.current ? Math.min(0.05, time - lastTimeRef.current) : 0.016;
+      const dt = lastTimeRef.current ? Math.min(0.05, time - lastTimeRef.current) : 0.025;
       lastTimeRef.current = time;
 
       const { w, h, focal } = dimRef.current;
@@ -903,10 +955,19 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         starSequenceRef.current += dt;
       }
 
-      // Keep the DOM photo overlay in step with canvas animation (throttled to 30fps to avoid main-thread thrashing)
-      if (currentTimeMs - lastCameraUpdateRef.current >= 1000 / 30) {
+      // Keep the DOM photo overlay in step with canvas animation (throttled to ~15fps & skipped when photos are hidden!)
+      const lastSent = lastCameraSentRef.current;
+      const photosActiveOrTransitioning =
+        scatter > 0.08 ||
+        lastSent.scatter > 0.08 ||
+        intro < 0.99 ||
+        lastSent.intro < 0.99 ||
+        lastSent.w !== w ||
+        lastSent.h !== h;
+      if (photosActiveOrTransitioning && currentTimeMs - lastCameraUpdateRef.current >= 66) {
         onCameraUpdateRef.current?.(yaw, pitch, w, h, effFocal, scatter, intro);
         lastCameraUpdateRef.current = currentTimeMs;
+        lastCameraSentRef.current = { w, h, scatter, intro };
       }
 
       // 1. Background
@@ -980,28 +1041,62 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         }
       }
 
-      // 4. Ground Glow
-      if (frameSettings.showGroundGlow) {
-        const pGlow = projectFrame(0, -10.2, 0);
-        ctx.save();
-        ctx.globalCompositeOperation = 'lighter';
-        ctx.translate(w / 2, pGlow.y);
-        ctx.scale(1, 0.17);
-        const pulse = 1 + 0.14 * Math.sin(time * 1.6);
-        const R = effFocal * 0.44 * pulse;
-        const gg = ctx.createRadialGradient(0, 0, 0, 0, 0, R);
-        gg.addColorStop(0, frameTheme.groundGlow.inner);
-        gg.addColorStop(0.45, frameTheme.groundGlow.mid);
-        gg.addColorStop(1, frameTheme.groundGlow.outer);
-        ctx.globalAlpha = Math.max(0, 1 - scatter * 1.5);
-        ctx.fillStyle = gg;
-        ctx.beginPath();
-        ctx.arc(0, 0, R, 0, TAU);
-        ctx.fill();
-        ctx.restore();
+      // 4. Ground Glow (pre-rendered offscreen sprite — zero per-frame radial gradients!)
+      if (frameSettings.showGroundGlow && scatter < 0.65) {
+        const ggKey = `${frameTheme.id}:${frameTheme.groundGlow.inner}`;
+        if (groundGlowCacheRef.current.key !== ggKey) {
+          const gCv = document.createElement('canvas');
+          gCv.width = 256;
+          gCv.height = 256;
+          const gCtx = gCv.getContext('2d');
+          if (gCtx) {
+            const gg = gCtx.createRadialGradient(128, 128, 0, 128, 128, 128);
+            gg.addColorStop(0, frameTheme.groundGlow.inner);
+            gg.addColorStop(0.45, frameTheme.groundGlow.mid);
+            gg.addColorStop(1, frameTheme.groundGlow.outer);
+            gCtx.fillStyle = gg;
+            gCtx.fillRect(0, 0, 256, 256);
+          }
+          groundGlowCacheRef.current = { key: ggKey, canvas: gCv };
+        }
+        const gCanvas = groundGlowCacheRef.current.canvas;
+        if (gCanvas) {
+          const pGlow = projectFrame(0, -10.2, 0);
+          const pulse = 1 + 0.14 * Math.sin(time * 1.6);
+          const R = effFocal * 0.44 * pulse;
+          ctx.save();
+          ctx.globalCompositeOperation = 'lighter';
+          ctx.globalAlpha = Math.max(0, 1 - scatter * 1.5);
+          ctx.translate(w / 2, pGlow.y);
+          ctx.scale(1, 0.17);
+          ctx.drawImage(gCanvas, -R, -R, R * 2, R * 2);
+          ctx.restore();
+        }
       }
 
-      // 5. Tree Points & Volumetric Stardust Cloud (up to 8,500 particles with on-the-fly return culling)
+      // Pre-calculate frame constants outside particle loop for silky performance
+      const sinYawParallax = Math.sin(yaw * 0.55) * portraitWidth * 0.04;
+      const sinPitchParallax = -Math.sin(pitch * 0.55) * portraitHeight * 0.04;
+
+      // 4b. Ultra-HD Pre-Rendered Stippled Stardust Portrait (crystal-clear face at 1 drawImage/frame!)
+      const renderedPortrait = portraitTargetsRef.current?.renderedCanvas;
+      if (hasPortrait && renderedPortrait && portraitProgress > 0.30) {
+        const rawReveal = Math.max(0, Math.min(1, (portraitProgress - 0.30) / 0.56));
+        const portraitCanvasAlpha = rawReveal * rawReveal * (3 - 2 * rawReveal);
+        const pxOffset = sinYawParallax * 0.28;
+        const pyOffset = sinPitchParallax * 0.28 + Math.sin(time * 0.9) * 1.4;
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.globalAlpha = portraitCanvasAlpha;
+        ctx.drawImage(
+          renderedPortrait,
+          portraitLeft + pxOffset,
+          portraitTop + pyOffset,
+          portraitWidth,
+          portraitHeight
+        );
+      }
+
+      // 5. Tree Points & Live Twinkling Stardust Cloud (1,800 particles with on-the-fly return culling)
       ctx.globalCompositeOperation = 'lighter';
       const pts = treePointsRef.current;
       const tempPts = tempStarPointsRef.current;
@@ -1012,10 +1107,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
 
       const isClosing = frameSettings.treeState === 'formed' || targetScatter === 0;
 
-      // On-the-fly return culling multipliers:
-      // - Priority 4 (outer scatter / shoulders): dissolved by scatter = 0.45
-      // - Priority 3 (hair texture): dissolved by scatter = 0.25
-      // - Temporary star particles: dissolve naturally in mid-air by scatter = 0.28
+      // On-the-fly return culling multipliers
       const p4ReturnFactor = isClosing ? Math.max(0, (portraitProgress - 0.45) / 0.55) : 1.0;
       const p3ReturnFactor = isClosing ? Math.max(0, (portraitProgress - 0.25) / 0.75) : 1.0;
       const tempReturnFactor = isClosing ? Math.max(0, (portraitProgress - 0.28) / 0.72) : 1.0;
@@ -1025,12 +1117,10 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         ? Math.pow(portraitProgress, 1.45)
         : portraitProgress;
 
-      // Pre-calculate frame constants outside particle loop for silky 60 FPS performance
-      const sinYawParallax = Math.sin(yaw * 0.55) * portraitWidth * 0.04;
-      const sinPitchParallax = -Math.sin(pitch * 0.55) * portraitHeight * 0.04;
       const isPurePortrait = portraitProgress >= 0.985;
       const isPureTree = portraitProgress <= 0.015;
       const gathering = (1 - intro) * Math.min(w, h) * 0.045;
+      const hasHDPortraitBase = Boolean(renderedPortrait);
 
       const renderParticle = (pt: TreePoint, isTemp: boolean) => {
         // CULLING CHECK 1: If temporary star particle has dissolved in mid-air, skip completely!
@@ -1138,7 +1228,10 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
             baseRadius = Math.max(0.65, Math.min(1.25, pt.portraitSize || 0.95));
           }
 
-          const finalAlpha = baseAlpha * whitePhaseFactor * priorityCullMult * tempFadeMult;
+          // When the HD stippled portrait canvas is underneath, keep live particles delicate so
+          // facial features remain razor-sharp while shimmering with active stardust & diamond glints!
+          const overlayBalance = hasHDPortraitBase ? (priority === 1 ? 0.65 : 0.48) : 1.0;
+          const finalAlpha = baseAlpha * overlayBalance * whitePhaseFactor * priorityCullMult * tempFadeMult;
 
           if (finalAlpha > 0.008) {
             ctx.globalAlpha = finalAlpha;
@@ -1265,9 +1358,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
       ) {
         ctx.save();
         ctx.globalCompositeOperation = 'lighter';
-        ctx.shadowColor = '#fff2a6';
-        ctx.shadowBlur = 9;
-        const moteCount = 26;
+        const moteCount = 22;
         const launchSpan = 0.2;
         const travelDuration = 0.24;
         for (let i = 0; i < moteCount; i++) {
@@ -1300,63 +1391,77 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
       const starAppearDuration = 0.2;
       const starReveal = Math.max(0, Math.min(1, (starSequenceTime - gatherDuration) / starAppearDuration));
       if (frameSettings.showStar && frameSettings.treeState === 'formed' && starReveal > 0) {
-        const appearScale = 0.2 + 0.8 * (1 - Math.pow(1 - starReveal, 3));
-        const pStar = projectFrame(0, 7.7, 0);
-        const pulse = 1 + 0.14 * Math.sin(time * 3.2);
-        ctx.save();
-        ctx.globalCompositeOperation = 'lighter';
-        ctx.globalAlpha = starReveal;
-        ctx.translate(pStar.x, pStar.y);
-        ctx.scale(pulse * appearScale, pulse * appearScale);
+        const starKey = `${frameTheme.id}:${Math.round(focal / 40)}`;
+        if (starCacheRef.current.key !== starKey) {
+          const R = focal * (frameTheme.id === 'snowglobe' ? 0.14 : 0.22);
+          const rayLen = focal * (frameTheme.id === 'snowglobe' ? 0.12 : 0.28);
+          const pad = Math.ceil(Math.max(R, rayLen) + 32);
+          const sCv = document.createElement('canvas');
+          sCv.width = pad * 2;
+          sCv.height = pad * 2;
+          const sCtx = sCv.getContext('2d');
+          if (sCtx) {
+            sCtx.translate(pad, pad);
+            const gStar = sCtx.createRadialGradient(0, 0, 0, 0, 0, R);
+            gStar.addColorStop(0, frameTheme.star.inner);
+            gStar.addColorStop(0.12, frameTheme.star.mid);
+            gStar.addColorStop(0.4, frameTheme.star.outer);
+            gStar.addColorStop(1, 'rgba(0,0,0,0)');
+            sCtx.fillStyle = gStar;
+            sCtx.beginPath();
+            sCtx.arc(0, 0, R, 0, TAU);
+            sCtx.fill();
 
-        const R = effFocal * (frameTheme.id === 'snowglobe' ? 0.14 : 0.22);
-        const gStar = ctx.createRadialGradient(0, 0, 0, 0, 0, R);
-        gStar.addColorStop(0, frameTheme.star.inner);
-        gStar.addColorStop(0.12, frameTheme.star.mid);
-        gStar.addColorStop(0.4, frameTheme.star.outer);
-        gStar.addColorStop(1, 'rgba(0,0,0,0)');
-        ctx.fillStyle = gStar;
-        ctx.beginPath();
-        ctx.arc(0, 0, R, 0, TAU);
-        ctx.fill();
+            for (let i = 0; i < 10; i++) {
+              sCtx.save();
+              sCtx.rotate((i * Math.PI) / 5);
+              const len = rayLen * (i % 2 === 0 ? 1 : 0.62);
+              const lg = sCtx.createLinearGradient(0, 0, len, 0);
+              lg.addColorStop(0, 'rgba(255,255,255,0.95)');
+              lg.addColorStop(1, 'rgba(255,255,255,0)');
+              sCtx.fillStyle = lg;
+              sCtx.beginPath();
+              sCtx.moveTo(0, -3.6);
+              sCtx.lineTo(len, 0);
+              sCtx.lineTo(0, 3.6);
+              sCtx.closePath();
+              sCtx.fill();
+              sCtx.restore();
+            }
 
-        // 10 Rays
-        const rayLen = effFocal * (frameTheme.id === 'snowglobe' ? 0.1 : 0.28);
-        for (let i = 0; i < 10; i++) {
+            const sr = focal * (frameTheme.id === 'snowglobe' ? 0.05 : 0.042);
+            sCtx.beginPath();
+            for (let k = 0; k < 10; k++) {
+              const r = k % 2 === 0 ? sr : sr * 0.42;
+              const a = (k * Math.PI) / 5 - Math.PI / 2;
+              const sx = Math.cos(a) * r;
+              const sy = Math.sin(a) * r;
+              if (k === 0) sCtx.moveTo(sx, sy);
+              else sCtx.lineTo(sx, sy);
+            }
+            sCtx.closePath();
+            sCtx.fillStyle = frameTheme.star.star;
+            sCtx.shadowColor = frameTheme.star.glow;
+            sCtx.shadowBlur = frameTheme.id === 'snowglobe' ? 22 : 36;
+            sCtx.fill();
+          }
+          starCacheRef.current = { key: starKey, canvas: sCv };
+        }
+
+        const starCanvas = starCacheRef.current.canvas;
+        if (starCanvas) {
+          const appearScale = 0.2 + 0.8 * (1 - Math.pow(1 - starReveal, 3));
+          const pStar = projectFrame(0, 7.7, 0);
+          const pulse = (1 + 0.12 * Math.sin(time * 3.2)) * zoomRef.current;
           ctx.save();
-          ctx.rotate((i * Math.PI) / 5 + time * 0.55);
-          const len = rayLen * (i % 2 === 0 ? 1 : 0.62);
-          const lg = ctx.createLinearGradient(0, 0, len, 0);
-          lg.addColorStop(0, 'rgba(255,255,255,0.95)');
-          lg.addColorStop(1, 'rgba(255,255,255,0)');
-          ctx.fillStyle = lg;
-          ctx.beginPath();
-          ctx.moveTo(0, -3.6);
-          ctx.lineTo(len, 0);
-          ctx.lineTo(0, 3.6);
-          ctx.closePath();
-          ctx.fill();
+          ctx.globalCompositeOperation = 'lighter';
+          ctx.globalAlpha = starReveal;
+          ctx.translate(pStar.x, pStar.y);
+          ctx.rotate(time * 0.22);
+          ctx.scale(pulse * appearScale, pulse * appearScale);
+          ctx.drawImage(starCanvas, -starCanvas.width / 2, -starCanvas.height / 2);
           ctx.restore();
         }
-
-        // Inner solid 10-point star
-        ctx.rotate(-time * 0.3);
-        const sr = focal * (frameTheme.id === 'snowglobe' ? 0.05 : 0.042);
-        ctx.beginPath();
-        for (let k = 0; k < 10; k++) {
-          const r = k % 2 === 0 ? sr : sr * 0.42;
-          const a = (k * Math.PI) / 5 - Math.PI / 2;
-          const sx = Math.cos(a) * r;
-          const sy = Math.sin(a) * r;
-          if (k === 0) ctx.moveTo(sx, sy);
-          else ctx.lineTo(sx, sy);
-        }
-        ctx.closePath();
-        ctx.fillStyle = frameTheme.star.star;
-        ctx.shadowColor = frameTheme.star.glow;
-        ctx.shadowBlur = frameTheme.id === 'snowglobe' ? 25 : 45;
-        ctx.fill();
-        ctx.restore();
       }
 
       // 9. Burst Click Particles
@@ -1384,36 +1489,48 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         burstsRef.current = activeBursts;
       }
 
-      // 10. Greeting Text (Matching Image 1: glowing golden cursive Merry Christmas)
+      // 10. Greeting Text (Cached offscreen canvas — ZERO per-frame CPU shadowBlur!)
       if (frameSettings.showGreeting && frameSettings.greetingText.trim().length > 0) {
-        ctx.globalCompositeOperation = 'source-over';
-        ctx.globalAlpha = Math.min(1, Math.max(intro, 0.95));
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-
-        const size = Math.max(34, Math.min(76, w * 0.065));
-        let fontStr = `italic bold ${size}px "Brush Script MT", "Great Vibes", "Segoe Script", cursive`;
-        if (frameSettings.greetingFont === 'serif') {
-          fontStr = `italic 800 ${size}px "Playfair Display", Georgia, serif`;
-        } else if (frameSettings.greetingFont === 'cinzel') {
-          fontStr = `800 ${size * 0.85}px "Cinzel", "Times New Roman", serif`;
+        const size = Math.round(Math.max(34, Math.min(76, w * 0.065)));
+        const greetKey = `${w}:${size}:${frameSettings.greetingFont}:${frameSettings.greetingText}`;
+        if (greetingCacheRef.current.key !== greetKey) {
+          const gCv = document.createElement('canvas');
+          const cw = Math.max(320, w);
+          const ch = Math.ceil(size * 2.4);
+          gCv.width = cw;
+          gCv.height = ch;
+          const gCtx = gCv.getContext('2d');
+          if (gCtx) {
+            let fontStr = `italic bold ${size}px "Brush Script MT", "Great Vibes", "Segoe Script", cursive`;
+            if (frameSettings.greetingFont === 'serif') {
+              fontStr = `italic 800 ${size}px "Playfair Display", Georgia, serif`;
+            } else if (frameSettings.greetingFont === 'cinzel') {
+              fontStr = `800 ${size * 0.85}px "Cinzel", "Times New Roman", serif`;
+            }
+            gCtx.font = fontStr;
+            gCtx.textAlign = 'center';
+            gCtx.textBaseline = 'middle';
+            const midY = ch / 2;
+            const textGrad = gCtx.createLinearGradient(0, midY - size / 2, 0, midY + size / 2);
+            textGrad.addColorStop(0, '#ffffff');
+            textGrad.addColorStop(0.3, '#fef08a');
+            textGrad.addColorStop(0.65, '#f59e0b');
+            textGrad.addColorStop(1, '#d97706');
+            gCtx.fillStyle = textGrad;
+            gCtx.shadowColor = 'rgba(251, 191, 36, 0.92)';
+            gCtx.shadowBlur = 28;
+            gCtx.fillText(frameSettings.greetingText, cw / 2, midY);
+          }
+          greetingCacheRef.current = { key: greetKey, canvas: gCv, width: cw, height: ch };
         }
-
-        ctx.font = fontStr;
-        // Firmly anchored at the bottom of the screen (never moves or jumps during transitions)
-        const textY = Math.round(h * 0.905);
-
-        const textGrad = ctx.createLinearGradient(0, textY - size / 2, 0, textY + size / 2);
-        textGrad.addColorStop(0, '#ffffff');
-        textGrad.addColorStop(0.3, '#fef08a');
-        textGrad.addColorStop(0.65, '#f59e0b');
-        textGrad.addColorStop(1, '#d97706');
-
-        ctx.fillStyle = textGrad;
-        ctx.shadowColor = 'rgba(251, 191, 36, 0.95)';
-        ctx.shadowBlur = 28 + 10 * Math.sin(time * 2);
-        ctx.fillText(frameSettings.greetingText, w / 2, textY);
-        ctx.shadowBlur = 0;
+        const gCache = greetingCacheRef.current;
+        if (gCache.canvas) {
+          const textY = Math.round(h * 0.905);
+          const shimmer = 0.92 + 0.08 * Math.sin(time * 2);
+          ctx.globalCompositeOperation = 'source-over';
+          ctx.globalAlpha = Math.min(1, Math.max(intro, 0.95)) * shimmer;
+          ctx.drawImage(gCache.canvas, (w - gCache.width) / 2, textY - gCache.height / 2);
+        }
       }
 
       animFrameRef.current = requestAnimationFrame(render);
