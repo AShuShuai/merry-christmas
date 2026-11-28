@@ -83,7 +83,7 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
   const photoOrbitMetaRef = useRef<Map<string, OrbitMeta>>(new Map());
   const photoIdsRef = useRef('');
 
-  // Smooth 3D orbital flywheel state with hand-driven inertial spin!
+  // Smooth 3D orbital flywheel state with dual Edge-Zone Continuous Spin + Smart Globe-Flick inertia!
   const frameStateRef = useRef({
     lastTime: performance.now(),
     orbitTime: 0,
@@ -91,6 +91,9 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
     spinVelocity: 0,
     lastYaw: yaw,
     lastDeltaX: 0,
+    lastFlickDir: 0,
+    lastFlickAt: 0,
+    activeEdgeSpinDir: 0, // -1 left, 0 none, +1 right
   });
 
   const frameState = frameStateRef.current;
@@ -103,18 +106,58 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
   const photoVisibility = revealProgress * revealProgress * (3 - 2 * revealProgress);
   const photosReady = introProgress >= 0.85 && scatter >= 0.72;
 
-  // Hand swipe injects smooth angular momentum so user can spin the 3D ring faster in either direction!
+  frameState.activeEdgeSpinDir = 0;
+
   if (photosReady && !isPhotoOpen) {
+    const isSteadyAimOnCard =
+      hoveringCardRef.current &&
+      gestureState.hasHand &&
+      Math.abs(gestureState.deltaX) < 0.006;
+
     if (gestureState.hasHand && gestureState.gesture !== 'fist' && !gestureState.isPinching) {
       const gx = gestureState.deltaX;
-      // Avoid double-counting the same gesture delta across repeated renders
-      if (Math.abs(gx) > 0.0022 && gx !== frameState.lastDeltaX) {
-        frameState.spinVelocity = Math.max(
-          -4.4,
-          Math.min(4.4, frameState.spinVelocity + gx * 30)
-        );
+
+      // 1. SMART GLOBE-FLICK IMPULSE (flick right/left right in the center of the webcam without leaving FOV!)
+      if (Math.abs(gx) > 0.0055 && gx !== frameState.lastDeltaX) {
+        const swipeDir = Math.sign(gx);
+        const sinceLastFlick = now - frameState.lastFlickAt;
+        // Ignore gentle return-stroke right after a strong flick so repositioning your hand never cancels spin!
+        const isGentleReturnStroke =
+          sinceLastFlick < 480 &&
+          frameState.lastFlickDir !== 0 &&
+          swipeDir === -frameState.lastFlickDir &&
+          Math.abs(gx) < 0.011;
+
+        if (!isGentleReturnStroke) {
+          const impulse = gx * 56;
+          frameState.spinVelocity = Math.max(
+            -4.6,
+            Math.min(4.6, frameState.spinVelocity + impulse)
+          );
+          if (Math.abs(gx) >= 0.0085) {
+            frameState.lastFlickDir = swipeDir;
+            frameState.lastFlickAt = now;
+          }
+        }
       }
       frameState.lastDeltaX = gx;
+
+      // 2. CONTINUOUS EDGE-ZONE JOYSTICK SPIN (hold hand comfortably in left/right zone to spin endlessly!)
+      // Automatically pauses when you're hovering steadily over a Polaroid so pinching is always effortless!
+      if (!isSteadyAimOnCard) {
+        const cxNorm = gestureState.cursorX;
+        if (cxNorm > 0.68) {
+          const strength = clamp01((cxNorm - 0.68) / 0.24);
+          const targetEdgeSpeed = 0.55 + strength * strength * 2.25;
+          frameState.spinVelocity += (targetEdgeSpeed - frameState.spinVelocity) * Math.min(1, deltaTime * 4.5);
+          frameState.activeEdgeSpinDir = 1;
+        } else if (cxNorm < 0.32) {
+          const strength = clamp01((0.32 - cxNorm) / 0.24);
+          const targetEdgeSpeed = -(0.55 + strength * strength * 2.25);
+          frameState.spinVelocity += (targetEdgeSpeed - frameState.spinVelocity) * Math.min(1, deltaTime * 4.5);
+          frameState.activeEdgeSpinDir = -1;
+        }
+      }
     } else {
       frameState.lastDeltaX = 0;
     }
@@ -129,18 +172,14 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
     }
     frameState.lastYaw = yaw;
 
-    // Gentle autonomous rotation slows down magnetically when hovering steadily over a card to pinch!
-    const isSteadyAim =
-      hoveringCardRef.current &&
-      gestureState.hasHand &&
-      Math.abs(gestureState.deltaX) < 0.0045 &&
-      Math.abs(frameState.spinVelocity) < 0.45;
-    const baseOrbitSpeed = isSteadyAim ? 0.04 : 0.22;
-
+    // Gentle autonomous rotation slows down magnetically when hovering over a card to pinch!
+    const baseOrbitSpeed = isSteadyAimOnCard ? 0.03 : 0.20;
     frameState.orbitAngle += (baseOrbitSpeed + frameState.spinVelocity) * deltaTime;
-    // Silky flywheel inertia damping
-    frameState.spinVelocity *= Math.exp(-deltaTime * 2.1);
-    if (Math.abs(frameState.spinVelocity) < 0.005) frameState.spinVelocity = 0;
+
+    // Longer, silkier flywheel glide when flicked (or crisp brake when aiming directly at a Polaroid!)
+    const dampingRate = isSteadyAimOnCard ? 7.5 : frameState.activeEdgeSpinDir !== 0 ? 0.4 : 1.25;
+    frameState.spinVelocity *= Math.exp(-deltaTime * dampingRate);
+    if (Math.abs(frameState.spinVelocity) < 0.006) frameState.spinVelocity = 0;
   } else {
     frameState.lastYaw = yaw;
     frameState.spinVelocity *= Math.exp(-deltaTime * 4);
@@ -398,6 +437,19 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
       className="absolute inset-0 pointer-events-none overflow-hidden select-none"
       style={{ perspective: '1200px' }}
     >
+      {/* Subtle Golden Directional Glow when holding hand in Left/Right Continuous Spin Zone */}
+      {photosReady && !isPhotoOpen && frameState.activeEdgeSpinDir !== 0 && (
+        <div
+          className={`pointer-events-none absolute top-1/2 -translate-y-1/2 z-30 flex items-center gap-1 rounded-full border border-amber-200/35 bg-black/45 px-3 py-1.5 text-amber-200/90 backdrop-blur-sm shadow-[0_0_24px_rgba(251,191,36,0.35)] transition-opacity duration-200 ${
+            frameState.activeEdgeSpinDir < 0 ? 'left-4' : 'right-4'
+          }`}
+        >
+          <span className="text-sm font-light tracking-widest">
+            {frameState.activeEdgeSpinDir < 0 ? '‹‹' : '››'}
+          </span>
+        </div>
+      )}
+
       {/* Borderless Luxury Glowing SVG Hand Cursor (no outer circle border!) */}
       {gestureState.hasHand && (
         <div
