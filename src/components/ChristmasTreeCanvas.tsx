@@ -18,15 +18,6 @@ import type { PortraitTargets } from '../engine/portraitProcessor';
 import { chimeAudio } from '../utils/audio';
 
 const TAU = Math.PI * 2;
-const TRUNK_SPRITES = generateSprites([
-  [96, 52, 30],
-  [131, 74, 40],
-  [167, 102, 56],
-  [193, 119, 63],
-  [220, 157, 91],
-  [245, 198, 130],
-  [144, 77, 52],
-]);
 
 // Pre-rendered glossy ornament spheres (eliminates 34 createRadialGradient + shadowBlur calls per frame!)
 const ORNAMENT_SPRITES: HTMLCanvasElement[] = ['#d33139', '#f3c64e', '#e9e1c0'].map((color) => {
@@ -526,11 +517,18 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
       key: '',
       canvas: null,
     });
-    const greetingCacheRef = useRef<{ key: string; canvas: HTMLCanvasElement | null; width: number; height: number }>({
+    const greetingCacheRef = useRef<{
+      key: string;
+      canvas: HTMLCanvasElement | null;
+      width: number;
+      height: number;
+      textWidth: number;
+    }>({
       key: '',
       canvas: null,
       width: 0,
       height: 0,
+      textWidth: 0,
     });
 
   // Scene points refs
@@ -591,7 +589,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
     const palette = currentThemeRef.current.palette;
     const treePalette = currentThemeRef.current.treePalette;
 
-    // 1. Tree Helix Points
+    // 1. Lush Tiered 3D Pine Foliage & Embedded Fairy Lights
     const pts: TreePoint[] = [];
     const total = sceneSettings.totalPoints;
     const strings = sceneSettings.strings;
@@ -600,13 +598,22 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
     for (let i = 0; i < total; i++) {
       const st = i % strings;
       const t = Math.floor(i / strings) / (total / strings);
-      const radius = 6.9 * Math.pow(1 - t, 0.85) + 0.45;
-      const ang = t * turns * TAU + (st * TAU) / strings;
-      const j = 0.14;
+      // Organic 7-tier scalloped pine bough profile + volumetric inner foliage depth!
+      const tierWave = 1 + 0.13 * Math.sin(t * 7.5 * TAU) * (1 - t * 0.65);
+      const isInnerCore = i % 4 === 0;
+      const depthScale = isInnerCore ? rand(0.84, 0.52) : rand(1.04, 0.90);
+      const radius = (6.9 * Math.pow(1 - t, 0.86) + 0.42) * tierWave * depthScale;
+      const ang = t * turns * TAU + (st * TAU) / strings + (isInnerCore ? rand(0.45, -0.45) : 0);
+      const j = 0.16;
       const ep = energyCloudPos(w, h);
-      const ornament = Math.random() < 0.035;
+
+      // Rich festive balance: ~81% layered emerald pine needles, ~15% warm golden fairy lights, ~4% glowing ornaments
+      const isFairyLight = !isInnerCore && Math.random() < 0.16;
+      const ornament = !isInnerCore && !isFairyLight && Math.random() < 0.045;
       const colorIndex = treePalette
-        ? palette.length + Math.min(treePalette.length - 1, Math.floor(t * treePalette.length))
+        ? isFairyLight || ornament
+          ? Math.floor(Math.random() * palette.length)
+          : palette.length + Math.min(treePalette.length - 1, Math.floor(t * treePalette.length))
         : Math.floor(Math.random() * palette.length);
       const originalColor: ColorRGB =
         treePalette && colorIndex >= palette.length
@@ -615,14 +622,14 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
 
       pts.push({
         x: Math.cos(ang) * radius + rand(j, -j),
-        y: -9 + t * 15.2 + rand(j, -j),
+        y: -8.6 + t * 14.9 + rand(j, -j),
         z: Math.sin(ang) * radius + rand(j, -j),
         t: t,
         c: colorIndex,
         originalColor,
-        base: ornament ? rand(1.05, 1.45) : rand(0.22, 0.38),
+        base: ornament ? rand(1.1, 1.5) : isFairyLight ? rand(0.44, 0.72) : rand(0.24, 0.42),
         phase: rand(TAU),
-        fade: t > 0.9 ? 1 - ((t - 0.9) / 0.1) * 0.6 : 1,
+        fade: t > 0.92 ? 1 - ((t - 0.92) / 0.08) * 0.45 : 1,
         sx: ep[0],
         sy: ep[1],
         portraitX: 0.5,
@@ -1197,6 +1204,111 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         );
       }
 
+      // 4c. Sculpted 3D Tapered Wooden Trunk (drawn behind front pine boughs so foliage drapes naturally!)
+      if (scatter < 0.14 && intro > 0.05) {
+        const trunkAlpha = Math.max(0, 1 - scatter / 0.14) * Math.min(1, intro * 1.4);
+        const revealTopY = -10.3 + Math.min(1, intro * 1.35) * 3.1;
+        const baseCenter = projectFrame(0, -10.35, 0);
+        const topCenter = projectFrame(0, revealTopY, 0);
+        const baseHalfW = Math.max(10, baseCenter.scale * 0.88);
+        const topHalfW = Math.max(6, topCenter.scale * 0.50);
+
+        ctx.save();
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.globalAlpha = trunkAlpha;
+
+        // Soft grounding shadow ellipse directly under the roots
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.42)';
+        ctx.beginPath();
+        ctx.ellipse(baseCenter.x, baseCenter.y + baseHalfW * 0.18, baseHalfW * 1.55, baseHalfW * 0.38, 0, 0, TAU);
+        ctx.fill();
+
+        // Tapered organic trunk silhouette with gentle root flare
+        ctx.beginPath();
+        ctx.moveTo(baseCenter.x - baseHalfW * 1.18, baseCenter.y);
+        ctx.quadraticCurveTo(
+          baseCenter.x - baseHalfW * 0.82,
+          (baseCenter.y + topCenter.y) * 0.55,
+          topCenter.x - topHalfW,
+          topCenter.y
+        );
+        ctx.lineTo(topCenter.x + topHalfW, topCenter.y);
+        ctx.quadraticCurveTo(
+          baseCenter.x + baseHalfW * 0.82,
+          (baseCenter.y + topCenter.y) * 0.55,
+          baseCenter.x + baseHalfW * 1.18,
+          baseCenter.y
+        );
+        ctx.ellipse(baseCenter.x, baseCenter.y, baseHalfW * 1.18, baseHalfW * 0.24, 0, 0, Math.PI);
+        ctx.closePath();
+
+        // Rich 3D cylindrical mahogany/cedar wood shading
+        const woodGrad = ctx.createLinearGradient(
+          baseCenter.x - baseHalfW * 1.15,
+          0,
+          baseCenter.x + baseHalfW * 1.15,
+          0
+        );
+        woodGrad.addColorStop(0, '#180a04');
+        woodGrad.addColorStop(0.24, '#472512');
+        woodGrad.addColorStop(0.46, '#754122');
+        woodGrad.addColorStop(0.66, '#4f2a14');
+        woodGrad.addColorStop(0.88, '#281207');
+        woodGrad.addColorStop(1, '#120703');
+        ctx.fillStyle = woodGrad;
+        ctx.fill();
+
+        // Subtle curved vertical bark grain ridges rotating naturally with tree yaw
+        ctx.clip();
+        ctx.strokeStyle = 'rgba(255, 208, 145, 0.14)';
+        ctx.lineWidth = Math.max(1, baseHalfW * 0.08);
+        for (let b = 0; b < 5; b++) {
+          const barkAngle = (b / 5) * TAU + yaw * 0.8;
+          const sinB = Math.sin(barkAngle);
+          if (Math.cos(barkAngle) < -0.1) continue;
+          const bxBottom = baseCenter.x + sinB * baseHalfW * 0.9;
+          const bxTop = topCenter.x + sinB * topHalfW * 0.85;
+          ctx.beginPath();
+          ctx.moveTo(bxBottom, baseCenter.y + 4);
+          ctx.quadraticCurveTo((bxBottom + bxTop) * 0.5 + sinB * 3, (baseCenter.y + topCenter.y) * 0.5, bxTop, topCenter.y);
+          ctx.stroke();
+        }
+
+        // Warm golden reflected rim glow from the Christmas tree lights at top & base
+        const rimGrad = ctx.createLinearGradient(0, topCenter.y, 0, baseCenter.y);
+        rimGrad.addColorStop(0, 'rgba(10, 35, 18, 0.55)'); // soft canopy shadow where boughs meet trunk
+        rimGrad.addColorStop(0.45, 'rgba(0, 0, 0, 0)');
+        rimGrad.addColorStop(1, 'rgba(255, 198, 92, 0.22)'); // warm ground light reflection
+        ctx.fillStyle = rimGrad;
+        ctx.fillRect(
+          baseCenter.x - baseHalfW * 1.4,
+          topCenter.y - 4,
+          baseHalfW * 2.8,
+          baseCenter.y - topCenter.y + baseHalfW * 0.5
+        );
+        ctx.restore();
+
+        // Delicate warm golden stardust motes spiraling gently around the wooden trunk base
+        const trunkDustSprite = goldSparkSpriteRef.current || sprites[0];
+        if (trunkDustSprite) {
+          ctx.save();
+          ctx.globalCompositeOperation = 'lighter';
+          for (let d = 0; d < 22; d++) {
+            const dtFrac = d / 22;
+            const dY = -10.2 + dtFrac * 2.8;
+            const dAng = d * 1.95 + time * 0.65;
+            const dRad = 0.95 - dtFrac * 0.34;
+            const dp = projectFrame(Math.cos(dAng) * dRad, dY, Math.sin(dAng) * dRad);
+            if (dp.z < -0.5) continue;
+            const tw = 0.45 + 0.55 * Math.sin(time * 3.8 + d * 2.1);
+            const sz = Math.max(2.2, dp.scale * (0.14 + 0.1 * tw));
+            ctx.globalAlpha = trunkAlpha * (0.28 + 0.45 * tw);
+            ctx.drawImage(trunkDustSprite, dp.x - sz / 2, dp.y - sz / 2, sz, sz);
+          }
+          ctx.restore();
+        }
+      }
+
       // 5. Unified Color-Morphing Particles — BIG BANG EXPLOSION -> ZERO-G STARFIELD -> FACE REFORMATION
       ctx.globalCompositeOperation = 'lighter';
       const pts = treePointsRef.current;
@@ -1628,41 +1740,6 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         ctx.restore();
       }
 
-      // Draw a dense, multicolored brown sparkle trunk, revealed from the roots upward.
-      if (scatter < 0.08) {
-        ctx.save();
-        ctx.globalCompositeOperation = 'lighter';
-        const trunkRows = 21;
-        const trunkColumns = 9;
-        for (let row = 0; row < trunkRows; row++) {
-          const rowProgress = row / (trunkRows - 1);
-          const rowReveal = intro * trunkRows - row;
-          if (rowReveal <= 0) continue;
-
-          const trunkY = -9.1 + rowProgress * 3.8;
-          const trunkHalfWidth = 0.5 - rowProgress * 0.12;
-          for (let column = 0; column < trunkColumns; column++) {
-            const columnPosition = column / (trunkColumns - 1) * 2 - 1;
-            const x = columnPosition * trunkHalfWidth + Math.sin(row * 2.1 + column * 1.7) * 0.035;
-            const z = ((row + column) % 5 - 2) * 0.09;
-            const point = projectFrame(x, trunkY, z);
-            const twinkle = 0.35 + 0.65 * Math.max(0, Math.sin(time * 5 + row * 1.3 + column * 2.2));
-            const fadeIn = Math.min(1, rowReveal);
-            const size = Math.max(2.5, point.scale * (0.2 + twinkle * 0.16));
-
-            ctx.globalAlpha = (1 - scatter) * fadeIn * (0.5 + twinkle * 0.5);
-            ctx.drawImage(
-              TRUNK_SPRITES[(row * 3 + column * 5) % TRUNK_SPRITES.length],
-              point.x - size / 2,
-              point.y - size / 2,
-              size,
-              size
-            );
-          }
-        }
-        ctx.restore();
-      }
-
       if (frameTheme.id === 'snowglobe' && scatter < 0.1) {
         drawTreeDecorations(ctx, projectFrame, time, intro, scatter);
       }
@@ -1854,7 +1931,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         burstsRef.current = activeBursts;
       }
 
-      // 10. Greeting Text (Cached offscreen canvas — ZERO per-frame CPU shadowBlur!)
+      // 10. Greeting Text (Cached offscreen canvas + Movie-Style Left-to-Right Golden Stardust Reveal!)
       if (frameSettings.showGreeting && frameSettings.greetingText.trim().length > 0) {
         const size = Math.round(Math.max(34, Math.min(76, w * 0.065)));
         const greetKey = `${w}:${size}:${frameSettings.greetingFont}:${frameSettings.greetingText}`;
@@ -1865,6 +1942,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
           gCv.width = cw;
           gCv.height = ch;
           const gCtx = gCv.getContext('2d');
+          let measuredWidth = Math.min(cw * 0.72, frameSettings.greetingText.length * size * 0.58);
           if (gCtx) {
             let fontStr = `italic bold ${size}px "Brush Script MT", "Great Vibes", "Segoe Script", cursive`;
             if (frameSettings.greetingFont === 'serif') {
@@ -1875,6 +1953,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
             gCtx.font = fontStr;
             gCtx.textAlign = 'center';
             gCtx.textBaseline = 'middle';
+            measuredWidth = Math.min(cw - 40, gCtx.measureText(frameSettings.greetingText).width + 48);
             const midY = ch / 2;
             const textGrad = gCtx.createLinearGradient(0, midY - size / 2, 0, midY + size / 2);
             textGrad.addColorStop(0, '#ffffff');
@@ -1886,15 +1965,86 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
             gCtx.shadowBlur = 28;
             gCtx.fillText(frameSettings.greetingText, cw / 2, midY);
           }
-          greetingCacheRef.current = { key: greetKey, canvas: gCv, width: cw, height: ch };
+          greetingCacheRef.current = {
+            key: greetKey,
+            canvas: gCv,
+            width: cw,
+            height: ch,
+            textWidth: measuredWidth,
+          };
         }
+
         const gCache = greetingCacheRef.current;
         if (gCache.canvas) {
           const textY = Math.round(h * 0.905);
           const shimmer = 0.92 + 0.08 * Math.sin(time * 2);
-          ctx.globalCompositeOperation = 'source-over';
-          ctx.globalAlpha = Math.min(1, Math.max(intro, 0.95)) * shimmer;
-          ctx.drawImage(gCache.canvas, (w - gCache.width) / 2, textY - gCache.height / 2);
+          const drawLeft = (w - gCache.width) / 2;
+          const drawTop = textY - gCache.height / 2;
+
+          // Movie-style left-to-right calligraphy reveal on page load / intro restart (0.35s -> 2.15s)
+          const rawSweep = Math.max(0, Math.min(1, (elapsedSinceIntro - 0.35) / 1.8));
+          const easedSweep = rawSweep * rawSweep * (3 - 2 * rawSweep);
+
+          if (easedSweep >= 0.999) {
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.globalAlpha = shimmer;
+            ctx.drawImage(gCache.canvas, drawLeft, drawTop);
+          } else if (easedSweep > 0.002) {
+            const textStartX = Math.max(0, (gCache.width - gCache.textWidth) / 2);
+            const revealWidthInCanvas = textStartX + gCache.textWidth * easedSweep;
+            const screenEdgeX = drawLeft + revealWidthInCanvas;
+
+            // Smoothly draw the revealed portion from left to right (1 fast sliced drawImage!)
+            const sliceW = Math.min(gCache.width, Math.max(1, revealWidthInCanvas));
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.globalAlpha = Math.min(1, easedSweep * 3.5) * shimmer;
+            ctx.drawImage(
+              gCache.canvas,
+              0,
+              0,
+              sliceW,
+              gCache.height,
+              drawLeft,
+              drawTop,
+              sliceW,
+              gCache.height
+            );
+
+            // Radiant Golden Stardust Quill & Magic Sparks writing the letters left -> right!
+            const quillFade = Math.sin(Math.PI * easedSweep);
+            if (quillFade > 0.02) {
+              ctx.save();
+              ctx.globalCompositeOperation = 'lighter';
+              const wandY = textY + Math.sin(easedSweep * 16) * (size * 0.14);
+
+              // Glowing warm golden aura at the writing tip
+              if (goldSparkSprite) {
+                const auraSz = size * (0.95 + 0.35 * quillFade);
+                ctx.globalAlpha = 0.72 * quillFade;
+                ctx.drawImage(goldSparkSprite, screenEdgeX - auraSz / 2, wandY - auraSz / 2, auraSz, auraSz);
+              }
+              // Crisp 4-point diamond star flare gliding across the letters
+              if (diamondStarSprite) {
+                const starSz = size * (0.85 + 0.3 * Math.sin(time * 12));
+                ctx.globalAlpha = 0.95 * quillFade;
+                ctx.drawImage(diamondStarSprite, screenEdgeX - starSz / 2, wandY - starSz / 2, starSz, starSz);
+              }
+              // Trailing golden stardust motes floating off the freshly written letters
+              const sparkSpr = goldSparkSprite || starlightSprite;
+              for (let k = 0; k < 10; k++) {
+                const lag = ((k * 0.13 + time * 1.4) % 1);
+                const sx = screenEdgeX - lag * (size * 1.45) - k * 2.5;
+                const sy =
+                  textY +
+                  Math.sin(k * 2.7 + time * 5) * (size * 0.36) -
+                  lag * (size * 0.35);
+                const spSize = Math.max(3, (1 - lag) * size * 0.24);
+                ctx.globalAlpha = (1 - lag) * 0.78 * quillFade;
+                ctx.drawImage(sparkSpr, sx - spSize / 2, sy - spSize / 2, spSize, spSize);
+              }
+              ctx.restore();
+            }
+          }
         }
       }
 
