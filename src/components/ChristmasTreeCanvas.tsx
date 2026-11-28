@@ -11,7 +11,7 @@ import {
   BurstParticle,
 } from '../types';
 import { THEMES } from '../config/themes';
-import { generateSprites, makeStarlightSprite, makeDiamondStarSprite } from '../engine/sprites';
+import { generateSprites, makeSprite, makeStarlightSprite, makeDiamondStarSprite } from '../engine/sprites';
 import { createProjector } from '../engine/projection';
 import { processPortraitImage } from '../engine/portraitProcessor';
 import type { PortraitTargets } from '../engine/portraitProcessor';
@@ -546,6 +546,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
   const burstsRef = useRef<BurstParticle[]>([]);
   const spritesRef = useRef<HTMLCanvasElement[]>([]);
   const starlightSpriteRef = useRef<HTMLCanvasElement | null>(null);
+  const goldSparkSpriteRef = useRef<HTMLCanvasElement | null>(null);
   const diamondStarSpriteRef = useRef<HTMLCanvasElement | null>(null);
 
   // Time & Intro tracking
@@ -728,6 +729,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
       ...(currentTheme.treePalette || []),
     ]);
     starlightSpriteRef.current = makeStarlightSprite(64);
+    goldSparkSpriteRef.current = makeSprite([255, 224, 132], 64);
     diamondStarSpriteRef.current = makeDiamondStarSprite(64);
   }, [currentTheme]);
 
@@ -933,8 +935,15 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
 
       const hasPortrait = portraitTargetsRef.current !== null;
       const targetScatter = frameSettings.treeState === 'dispersed' && hasPortrait ? 1 : 0;
-      const scatterEase = 1 - Math.exp(-3.7 * dt);
-      scatterRef.current += (targetScatter - scatterRef.current) * scatterEase;
+      // Smooth, movie-paced linear progression so each particle's staggered quintic S-curve & vortex swirl shine!
+      const morphDuration = targetScatter > scatterRef.current ? 1.55 : 1.25;
+      const maxDelta = dt / morphDuration;
+      const diffScatter = targetScatter - scatterRef.current;
+      if (Math.abs(diffScatter) <= maxDelta) {
+        scatterRef.current = targetScatter;
+      } else {
+        scatterRef.current += Math.sign(diffScatter) * maxDelta;
+      }
       const scatter = scatterRef.current;
       const portraitProgress = hasPortrait ? scatter : 0;
       const portraitClarity = 1 - portraitProgress;
@@ -1077,86 +1086,123 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
       // Pre-calculate frame constants outside particle loop for silky performance
       const sinYawParallax = Math.sin(yaw * 0.55) * portraitWidth * 0.04;
       const sinPitchParallax = -Math.sin(pitch * 0.55) * portraitHeight * 0.04;
+      const minDim = Math.min(w, h);
+      const isClosing = frameSettings.treeState === 'formed' || targetScatter === 0;
+      const isMorphing = hasPortrait && portraitProgress > 0.005 && portraitProgress < 0.995;
 
-      // 4b. Ultra-HD Pre-Rendered Stippled Stardust Portrait (crystal-clear face at 1 drawImage/frame!)
+      // 4a. Cinematic Magic Light Shockwave Rings during the transformation climax (zero shadowBlur!)
+      if (isMorphing && portraitProgress > 0.06 && portraitProgress < 0.92) {
+        const waveT = (portraitProgress - 0.06) / 0.86;
+        const ringAlpha = Math.sin(Math.PI * waveT) * 0.24;
+        const centerX = w / 2;
+        const centerY = h * 0.45;
+        const baseR = minDim * (0.08 + 0.46 * (1 - Math.pow(1 - waveT, 2.2)));
+
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        // Outer soft golden halo ring
+        ctx.strokeStyle = `rgba(255, 224, 145, ${(ringAlpha * 0.7).toFixed(3)})`;
+        ctx.lineWidth = 4.5 * (1 - waveT * 0.6);
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, baseR, 0, TAU);
+        ctx.stroke();
+
+        // Inner crisp white starlight ring
+        ctx.strokeStyle = `rgba(255, 255, 255, ${ringAlpha.toFixed(3)})`;
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, baseR * 0.78, 0, TAU);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // 4b. Ultra-HD Pre-Rendered Stippled Stardust Portrait (crystallizes directly out of converging particles!)
       const renderedPortrait = portraitTargetsRef.current?.renderedCanvas;
-      if (hasPortrait && renderedPortrait && portraitProgress > 0.30) {
-        const rawReveal = Math.max(0, Math.min(1, (portraitProgress - 0.30) / 0.56));
+      if (hasPortrait && renderedPortrait && portraitProgress > 0.46) {
+        const rawReveal = Math.max(0, Math.min(1, (portraitProgress - 0.46) / 0.50));
+        // Silky crystallization ease + gentle scale settle (0.94 -> 1.0) as particles lock into her face
         const portraitCanvasAlpha = rawReveal * rawReveal * (3 - 2 * rawReveal);
-        const pxOffset = sinYawParallax * 0.28;
-        const pyOffset = sinPitchParallax * 0.28 + Math.sin(time * 0.9) * 1.4;
+        const settleScale = 0.945 + 0.055 * portraitCanvasAlpha;
+        const drawW = portraitWidth * settleScale;
+        const drawH = portraitHeight * settleScale;
+        const pxOffset = sinYawParallax * 0.28 + (portraitWidth - drawW) / 2;
+        const pyOffset = sinPitchParallax * 0.28 + (portraitHeight - drawH) / 2 + Math.sin(time * 0.9) * 1.4;
         ctx.globalCompositeOperation = 'source-over';
         ctx.globalAlpha = portraitCanvasAlpha;
         ctx.drawImage(
           renderedPortrait,
           portraitLeft + pxOffset,
           portraitTop + pyOffset,
-          portraitWidth,
-          portraitHeight
+          drawW,
+          drawH
         );
       }
 
-      // 5. Tree Points & Live Twinkling Stardust Cloud (1,800 particles with on-the-fly return culling)
+      // 5. Unified Color-Morphing Particles with Cinematic 3D Vortex Swirl & Stardust Comet Trails
       ctx.globalCompositeOperation = 'lighter';
       const pts = treePointsRef.current;
       const tempPts = tempStarPointsRef.current;
       const breathe = frameSettings.breatheEffect ? 1 + 0.07 * Math.sin(time * 0.9) : 1;
       const heartbeat = frameSettings.breatheEffect ? 0.9 + 0.1 * Math.pow(Math.max(0, Math.sin(time * 1.8)), 6) : 1;
       const starlightSprite = starlightSpriteRef.current || sprites[0];
+      const goldSparkSprite = goldSparkSpriteRef.current || sprites[0];
       const diamondStarSprite = diamondStarSpriteRef.current;
 
-      const isClosing = frameSettings.treeState === 'formed' || targetScatter === 0;
-
-      // On-the-fly return culling multipliers
-      const p4ReturnFactor = isClosing ? Math.max(0, (portraitProgress - 0.45) / 0.55) : 1.0;
-      const p3ReturnFactor = isClosing ? Math.max(0, (portraitProgress - 0.25) / 0.75) : 1.0;
       const tempReturnFactor = isClosing ? Math.max(0, (portraitProgress - 0.28) / 0.72) : 1.0;
 
-      // Faster, lighter return curve as particles snap back to the helix
-      const returnEase = isClosing
-        ? Math.pow(portraitProgress, 1.45)
-        : portraitProgress;
-
-      const isPurePortrait = portraitProgress >= 0.985;
-      const isPureTree = portraitProgress <= 0.015;
-      const gathering = (1 - intro) * Math.min(w, h) * 0.045;
+      const isPurePortrait = portraitProgress >= 0.995;
+      const isPureTree = portraitProgress <= 0.005;
+      const gathering = (1 - intro) * minDim * 0.045;
       const hasHDPortraitBase = Boolean(renderedPortrait);
 
-      const renderParticle = (pt: TreePoint, isTemp: boolean) => {
-        // CULLING CHECK 1: If temporary star particle has dissolved in mid-air, skip completely!
+      // Collect batched comet streak coordinates during flight (1 single stroke call = < 0.3ms CPU!)
+      const cometSegments: number[] = [];
+
+      const renderParticle = (pt: TreePoint, idx: number, isTemp: boolean) => {
         if (isTemp && isClosing && tempReturnFactor <= 0.005) {
           return;
         }
 
         const priority = pt.portraitPriority || 2;
 
-        // CULLING CHECK 2: Progressive Fade & Kill 30% to 50% of less critical particles during return
-        let priorityCullMult = 1.0;
-        if (isClosing) {
-          if (priority === 4) {
-            priorityCullMult = p4ReturnFactor;
-          } else if (priority === 3) {
-            priorityCullMult = p3ReturnFactor;
-          }
+        // Staggered movie-style cascade wave:
+        // Opening: base & lower garlands lift off first in a swirling vortex up into Chiara's face!
+        // Closing: outer stardust & shoulders swirl back first into the spinning Christmas tree!
+        let localP = portraitProgress;
+        let easeP = portraitProgress;
+        let midArc = 0;
+
+        if (isMorphing) {
+          const stagger = isClosing
+            ? (1 - pt.t) * 0.26 + (pt.phase / TAU) * 0.12
+            : pt.t * 0.30 + (pt.phase / TAU) * 0.14;
+          const span = Math.max(0.42, 1 - stagger * 0.56);
+          const rawLocal = isClosing
+            ? (portraitProgress - (1 - span) * (1 - stagger * 0.3)) / span
+            : (portraitProgress - stagger * 0.56) / span;
+          localP = Math.max(0, Math.min(1, rawLocal));
+          // Quintic Hollywood S-curve (graceful launch -> energetic sweep -> magnetic gentle landing)
+          easeP = localP * localP * localP * (localP * (localP * 6 - 15) + 10);
+          midArc = Math.sin(Math.PI * easeP);
         }
 
-        let cx = 0;
-        let cy = 0;
+        let treeX = 0;
+        let treeY = 0;
         let depth = 0.5;
         let treeSize = 1.0;
 
-        // Fast 3D Tree Projection (completely skipped when morphed into pure portrait mode!)
-        if (!isPurePortrait) {
+        // 3D Tree Projection (completely skipped when settled in pure portrait mode!)
+        if (!isPurePortrait && easeP < 0.999) {
           const p = particleProjectFrame(pt.x * breathe, pt.y, pt.z * breathe);
           const px = w / 2 + (p.x - w / 2) * intro;
           const py = h / 2 + (p.y - h / 2) * intro;
-          cx = pt.sx + (px - pt.sx) * intro;
-          cy = pt.sy + (py - pt.sy) * intro;
+          treeX = pt.sx + (px - pt.sx) * intro;
+          treeY = pt.sy + (py - pt.sy) * intro;
 
           if (gathering > 0.001) {
             const swirl = pt.phase + time * (1.5 + pt.t);
-            cx += Math.sin(swirl) * gathering;
-            cy += Math.cos(swirl * 1.35) * gathering * 0.72;
+            treeX += Math.sin(swirl) * gathering;
+            treeY += Math.cos(swirl * 1.35) * gathering * 0.72;
           }
 
           depth = Math.max(0, Math.min(1, (p.z + 8) / 15));
@@ -1166,8 +1212,11 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
           treeSize = pt.base * p.scale * (0.8 + 0.4 * twinkle + 0.3 * waveTwinkle + 0.5 * spark);
         }
 
-        // Fast Portrait Mapping (completely skipped when in pure tree mode!)
-        if (hasPortrait && !isPureTree) {
+        let cx = treeX;
+        let cy = treeY;
+
+        // Portrait Target Mapping + Cinematic 3D Vortex Flight Path
+        if (hasPortrait && !isPureTree && easeP > 0.001) {
           const pZ = pt.portraitZ || 0;
           const volOffsetX = sinYawParallax * pZ;
           const volOffsetY = sinPitchParallax * pZ;
@@ -1179,27 +1228,54 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
           const targetX = portraitLeft + pt.portraitX * portraitWidth + (volOffsetX + floatOffset + jitX);
           const targetY = portraitTop + pt.portraitY * portraitHeight + (volOffsetY + floatOffset * 0.7 + jitY);
 
-          if (isPurePortrait) {
+          if (isPurePortrait || easeP >= 0.999) {
             cx = targetX;
             cy = targetY;
           } else {
-            cx += (targetX - cx) * returnEase;
-            cy += (targetY - cy) * returnEase;
+            const baseX = treeX + (targetX - treeX) * easeP;
+            const baseY = treeY + (targetY - treeY) * easeP;
+
+            // 3D Galactic Vortex Swirl: particles sweep outward along a glowing spiral ribbon mid-flight!
+            const spinDir = isClosing ? -1 : 1;
+            const swirlSpin = pt.phase * 1.6 + spinDir * easeP * 5.2;
+            const cosSwirl = Math.cos(swirlSpin);
+            const sinSwirl = Math.sin(swirlSpin);
+            const swirlAmp = midArc * minDim * (0.065 + 0.115 * pt.t);
+            const liftArc = -midArc * h * 0.042 * (0.45 + 0.55 * Math.sin(pt.phase * 2.1));
+
+            cx = baseX + cosSwirl * swirlAmp;
+            cy = baseY + sinSwirl * swirlAmp * 0.62 + liftArc;
+
+            // Record velocity-aligned glowing stardust comet tail for ~33% of particles mid-flight
+            if (midArc > 0.14 && idx % 3 === 0) {
+              const flightDir = isClosing ? -1 : 1;
+              // Tangent combines direct flight vector + vortex orbital velocity
+              const tanX = (targetX - treeX) * 0.045 * flightDir - sinSwirl * spinDir * swirlAmp * 0.24;
+              const tanY = (targetY - treeY) * 0.045 * flightDir + cosSwirl * spinDir * swirlAmp * 0.15;
+              const tailScale = 0.55 + 0.85 * midArc;
+              cometSegments.push(cx, cy, cx - tanX * tailScale, cy - tanY * tailScale);
+            }
           }
         }
 
-        const portraitRadius = Math.max(0.55, Math.min(1.35, pt.portraitSize || 0.85));
+        // UNIFIED PARTICLE RENDERING: the exact same particle smoothly shifts color
+        // Tree Color (emerald/gold/red) -> Warm Radiant Gold Spark mid-flight -> Pure White Diamond Starlight!
+        const portraitRadius =
+          priority === 1
+            ? Math.max(0.6, Math.min(1.1, pt.portraitSize || 0.85))
+            : Math.max(0.65, Math.min(1.25, pt.portraitSize || 0.95));
         const treeRadius = Math.max(0.5, treeSize * 0.5);
-        const radius = treeRadius * (1 - portraitProgress) + portraitRadius * portraitProgress;
+        // Subtle cinematic lens bloom mid-flight (particles glow warmly as they swirl!)
+        const flightFlareBoost = 1 + 0.62 * midArc;
+        const radius = (treeRadius * (1 - easeP) + portraitRadius * easeP) * flightFlareBoost;
 
-        // Single-pass draw: smoothly transitions from tree sprite to starlight sprite without doubling draw calls
-        if (portraitProgress < 0.45) {
+        if (easeP <= 0.015) {
+          // Pure Tree state (1 draw call)
           if (!isTemp) {
             const twinkle = 0.5 + 0.5 * Math.sin(time * 4 + pt.phase);
             const spark = Math.pow(Math.max(0, Math.sin(time * 2.2 + pt.phase * 2)), 16);
             const glow = (0.4 + 0.35 * twinkle + 0.6 * spark) * heartbeat;
-            const baseAlpha = Math.min(1, glow * (0.4 + 0.6 * depth) * pt.fade * (0.4 + 0.6 * intro));
-            const treeAlpha = baseAlpha * (1 - portraitProgress * 2.1);
+            const treeAlpha = Math.min(1, glow * (0.4 + 0.6 * depth) * pt.fade * (0.4 + 0.6 * intro));
             if (treeAlpha > 0.005) {
               ctx.globalAlpha = treeAlpha;
               const originalSprite = sprites[pt.c] || sprites[0];
@@ -1207,39 +1283,23 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
               ctx.drawImage(originalSprite, cx - drawSize / 2, cy - drawSize / 2, drawSize, drawSize);
             }
           }
-        } else {
+        } else if (easeP >= 0.985) {
+          // Pure Portrait state (1 draw call + occasional diamond flare)
           const pSpeed = pt.portraitSpeed || 2.4;
           const pTwinkle = 0.85 + 0.15 * Math.sin(time * pSpeed + pt.phase * 3.7);
-          const whitePhaseFactor = Math.min(1.0, (portraitProgress - 0.45) * 2.2);
-          const tempFadeMult = isTemp ? tempReturnFactor : 1.0;
-
-          let baseAlpha: number;
-          let baseRadius: number;
-
-          if (priority === 1) {
-            // 40% Feature Detail Layer: crisp, high-opacity white particles (0.6px - 1.1px, alpha 0.85 - 1.0)
-            const pLight = pt.portraitLight ?? 0.95;
-            baseAlpha = Math.min(1.0, Math.max(0.85, pLight * pTwinkle));
-            baseRadius = Math.max(0.6, Math.min(1.1, pt.portraitSize || 0.85));
-          } else {
-            // 60% Soft Shading Layer: alpha mapped to pixel brightness (0.25 - 0.70, radius 0.65 - 1.25px)
-            const pLight = pt.portraitLight ?? 0.45;
-            baseAlpha = Math.min(0.70, Math.max(0.25, pLight * pTwinkle));
-            baseRadius = Math.max(0.65, Math.min(1.25, pt.portraitSize || 0.95));
-          }
-
-          // When the HD stippled portrait canvas is underneath, keep live particles delicate so
-          // facial features remain razor-sharp while shimmering with active stardust & diamond glints!
+          const pLight = pt.portraitLight ?? (priority === 1 ? 0.95 : 0.45);
+          const baseAlpha =
+            priority === 1
+              ? Math.min(1.0, Math.max(0.85, pLight * pTwinkle))
+              : Math.min(0.70, Math.max(0.25, pLight * pTwinkle));
           const overlayBalance = hasHDPortraitBase ? (priority === 1 ? 0.65 : 0.48) : 1.0;
-          const finalAlpha = baseAlpha * overlayBalance * whitePhaseFactor * priorityCullMult * tempFadeMult;
+          const finalAlpha = baseAlpha * overlayBalance * (isTemp ? tempReturnFactor : 1.0);
 
           if (finalAlpha > 0.008) {
             ctx.globalAlpha = finalAlpha;
-            // Compact crisp starlight radius (not oversized blobs!)
-            const drawSize = Math.max(2.0, baseRadius * 2.2);
+            const drawSize = Math.max(2.0, portraitRadius * 2.2);
             ctx.drawImage(starlightSprite, cx - drawSize / 2, cy - drawSize / 2, drawSize, drawSize);
 
-            // Sparkling diamond star glints: pure GPU sprite blit
             if (diamondStarSprite && (pt.portraitIsSparkle || (priority === 1 && pTwinkle > 0.96))) {
               const pFlare = Math.pow(Math.max(0, Math.sin(time * 1.8 + pt.phase * 4.9)), 12);
               if (pFlare > 0.35) {
@@ -1249,18 +1309,81 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
               }
             }
           }
+        } else {
+          // ACTIVE CINEMATIC COLOR MORPH (same particle continuously shifting color!)
+          const drawSize = Math.max(2.2, radius * 2.35);
+          const tempFadeMult = isTemp ? tempReturnFactor : 1.0;
+
+          // 1. Original Tree Color Sprite fades smoothly out from 0% -> 58%
+          const treeColorWeight = Math.max(0, 1 - easeP * 1.72);
+          if (!isTemp && treeColorWeight > 0.02) {
+            ctx.globalAlpha = Math.min(1, (0.65 + 0.35 * depth) * pt.fade * treeColorWeight);
+            const originalSprite = sprites[pt.c] || sprites[0];
+            ctx.drawImage(originalSprite, cx - drawSize / 2, cy - drawSize / 2, drawSize, drawSize);
+          }
+
+          // 2. Radiant Warm Gold Spark ignites right in the vortex peak (15% -> 85%)
+          const goldWeight = midArc * 0.88 * tempFadeMult;
+          if (goldWeight > 0.03) {
+            const goldSize = drawSize * (1.05 + 0.35 * midArc);
+            ctx.globalAlpha = Math.min(0.92, goldWeight);
+            ctx.drawImage(goldSparkSprite, cx - goldSize / 2, cy - goldSize / 2, goldSize, goldSize);
+          }
+
+          // 3. Pure White Diamond Starlight rises smoothly from 24% -> 100%
+          const whiteRise = Math.max(0, Math.min(1, (easeP - 0.22) / 0.72));
+          if (whiteRise > 0.02) {
+            const pLight = pt.portraitLight ?? (priority === 1 ? 0.95 : 0.55);
+            const targetAlpha =
+              (priority === 1 ? Math.max(0.8, pLight) : Math.max(0.32, pLight)) *
+              (hasHDPortraitBase ? (priority === 1 ? 0.72 : 0.56) : 1.0);
+            ctx.globalAlpha = Math.min(1, (targetAlpha + 0.35 * midArc) * whiteRise * tempFadeMult);
+            ctx.drawImage(starlightSprite, cx - drawSize / 2, cy - drawSize / 2, drawSize, drawSize);
+          }
+
+          // 4. Cinematic Diamond Glint Flashes on leading edge of the swirling vortex!
+          if (diamondStarSprite && midArc > 0.45 && (pt.portraitIsSparkle || idx % 17 === 0)) {
+            const flareSize = drawSize * (1.75 + 1.1 * midArc);
+            ctx.globalAlpha = Math.min(0.95, midArc * 0.85 * tempFadeMult);
+            ctx.drawImage(diamondStarSprite, cx - flareSize / 2, cy - flareSize / 2, flareSize, flareSize);
+          }
         }
       };
 
       for (let i = 0; i < pts.length; i++) {
-        renderParticle(pts[i], false);
+        renderParticle(pts[i], i, false);
       }
 
-      // Temporary star particles (dissolve rapidly in mid-air on return, skipped if evaporated)
+      // Temporary star particles (if any)
       if (portraitProgress > 0 && tempPts.length > 0 && (!isClosing || tempReturnFactor > 0.005)) {
         for (let i = 0; i < tempPts.length; i++) {
-          renderParticle(tempPts[i], true);
+          renderParticle(tempPts[i], i, true);
         }
+      }
+
+      // Draw ALL glowing stardust comet trails in TWO ultra-fast batched GPU path strokes!
+      if (cometSegments.length > 0) {
+        const globalMidPeak = Math.sin(Math.PI * portraitProgress);
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        for (let s = 0; s < cometSegments.length; s += 4) {
+          ctx.moveTo(cometSegments[s], cometSegments[s + 1]);
+          ctx.lineTo(cometSegments[s + 2], cometSegments[s + 3]);
+        }
+        // Soft golden outer magic streak
+        ctx.globalAlpha = Math.min(0.45, 0.28 * globalMidPeak);
+        ctx.strokeStyle = '#ffd984';
+        ctx.lineWidth = 2.0;
+        ctx.stroke();
+
+        // Crisp pure-white starlight core streak
+        ctx.globalAlpha = Math.min(0.65, 0.46 * globalMidPeak);
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 0.85;
+        ctx.stroke();
+        ctx.restore();
       }
 
       // Draw a dense, multicolored brown sparkle trunk, revealed from the roots upward.
