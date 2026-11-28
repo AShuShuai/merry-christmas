@@ -402,11 +402,11 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
     const fWidth = fRight - fLeft;
     const fHeight = fBottom - fTop;
 
-    // Both shoulders and full hair framing:
+    // Both shoulders and full hair framing (cut shoulder height by half: "diminuisci di metà le spalle")
     const bLeft = Math.max(0.02, Math.min(rawPersonMinX - 0.02, fLeft - fWidth * 0.95));
     const bRight = Math.min(0.98, Math.max(rawPersonMaxX + 0.02, fRight + fWidth * 0.95));
     const bTop = Math.max(0.02, Math.min(rawPersonMinY - 0.02, fTop - fHeight * 0.35));
-    const bBottom = Math.min(0.98, Math.max(rawPersonMaxY + 0.01, fBottom + fHeight * 1.15));
+    const bBottom = Math.min(0.82, fBottom + fHeight * 0.48);
 
     bounds = {
       left: bLeft,
@@ -424,7 +424,7 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
     const bLeft = Math.max(0.02, rawPersonMinX - 0.02);
     const bRight = Math.min(0.98, rawPersonMaxX + 0.02);
     const bTop = Math.max(0.02, rawPersonMinY - 0.02);
-    const bBottom = Math.min(0.98, rawPersonMaxY + 0.01);
+    const bBottom = Math.min(0.82, rawPersonMinY + (rawPersonMaxY - rawPersonMinY) * 0.58);
 
     bounds = {
       left: bLeft,
@@ -456,8 +456,8 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
       200,
       0.15,
       3.0,
-      0.75,
-      1.35,
+      0.55,
+      0.95,
       0.34,
       0.003
     );
@@ -474,8 +474,8 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
       200,
       0.15,
       3.0,
-      0.75,
-      1.35,
+      0.55,
+      0.95,
       0.34,
       0.003
     );
@@ -493,8 +493,8 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
       0.32,
       2.6,
       0.008,
-      0.7,
-      1.25,
+      0.5,
+      0.85,
       0.28
     );
     allPoints.push(...leftBrowPoints);
@@ -511,8 +511,8 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
       0.32,
       2.6,
       0.008,
-      0.7,
-      1.25,
+      0.5,
+      0.85,
       0.28
     );
     allPoints.push(...rightBrowPoints);
@@ -529,8 +529,8 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
       0.85,
       3.2,
       0.010,
-      0.9,
-      1.6,
+      0.65,
+      1.1,
       0.38
     );
     allPoints.push(...noseRidge);
@@ -546,8 +546,8 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
       120,
       0.55,
       2.5,
-      0.8,
-      1.4,
+      0.6,
+      1.0,
       0.32,
       0.005
     );
@@ -567,8 +567,8 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
       340,
       0.48,
       3.2,
-      0.85,
-      1.5,
+      0.65,
+      1.1,
       0.30,
       0.008
     );
@@ -595,29 +595,27 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
       const edge = edges[idx];
       const skinPixel = isSkin[idx];
 
-      // SHOULDER SOFT FADE-OUT: keeps full shoulders completely visible, fading only the very bottom edge above Merry Christmas
+      // SHOULDER SOFT FADE-OUT: reduces shoulder height by half, fading out by normY = 0.80
       let fade = 1.0;
-      if (normY > 0.88) {
-        fade *= Math.max(0, 1.0 - Math.pow(Math.min(1, (normY - 0.88) / 0.10), 1.25));
+      if (normY > 0.68) {
+        fade *= Math.max(0, 1.0 - Math.pow(Math.min(1, (normY - 0.68) / 0.12), 1.4));
       }
 
-      if (fade <= 0.001) continue;
+      if (fade <= 0.001 || normY > 0.80) continue;
 
-      // HIGH-CONTRAST GAMMA CURVE:
-      // Dark areas (pupils, nostrils, lip seam, dark shadow) receive 0 density!
-      let contrastLum = 0;
-      if (lum > 0.24) {
-        contrastLum = Math.pow((lum - 0.24) / 0.76, 1.45);
-      }
-
+      // STRICT HIGH-CONTRAST CHIAROSCURO:
+      // Dark areas (pupils, nostrils, lip seam, dark hair shadows) receive ZERO density!
       let localDensity = 0;
       if (skinPixel) {
-        // High density on inner face skin, shaped by contrast
-        localDensity = 3.6 * (0.15 + 0.85 * contrastLum) * fade;
+        if (lum > 0.28) {
+          const contrastLum = Math.pow((lum - 0.28) / 0.72, 1.55);
+          localDensity = 4.2 * contrastLum * fade;
+        }
       } else {
-        // Lower density on outer hair silhouette compared to inner face
-        const hairSheen = Math.pow(lum, 0.8);
-        localDensity = 1.35 * (0.3 + 0.7 * hairSheen + 0.4 * edge) * fade;
+        if (lum > 0.18) {
+          const hairSheen = Math.pow((lum - 0.18) / 0.82, 1.3);
+          localDensity = 1.4 * (0.6 * hairSheen + 0.5 * edge) * fade;
+        }
       }
 
       densityField[idx] = localDensity;
@@ -679,8 +677,8 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
       const normX = (rawX - bounds.left) / bounds.width;
       const normY = (rawY - bounds.top) / bounds.height;
 
-      // Full bounds covering face, hair, and BOTH shoulders down to 0.96!
-      if (normX < 0.02 || normX > 0.98 || normY < 0.02 || normY > 0.96) continue;
+      // Full bounds covering face, hair, and upper shoulders down to 0.80
+      if (normX < 0.02 || normX > 0.98 || normY < 0.02 || normY > 0.80) continue;
 
       const lightVal = luminance[idx];
       const skinPixel = isSkin[idx];
@@ -690,14 +688,14 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
       let zVal = (faceDome - 0.45) * 0.7;
       if (normY > 0.65) zVal -= (normY - 0.65) * 0.85;
 
-      // Radiant stardust size (1.0px to 2.4px radius, clear and bright like Image 3)
-      let baseSize = 1.0 + 1.1 * Math.pow(lightVal, 1.1) + (Math.random() - 0.5) * 0.25;
-      if (skinPixel) baseSize += 0.35;
-      const clampedSize = Math.max(0.9, Math.min(2.5, baseSize));
+      // Fine, sharp stardust size (0.65px to 1.35px radius) for crisp facial likeness
+      let baseSize = 0.65 + 0.65 * Math.pow(lightVal, 1.2) + (Math.random() - 0.5) * 0.15;
+      if (skinPixel) baseSize += 0.15;
+      const clampedSize = Math.max(0.55, Math.min(1.4, baseSize));
 
       let priority = 2;
       let category: 'feature' | 'skin' | 'hair' | 'scatter' = 'skin';
-      if (normY > 0.88) {
+      if (normY > 0.70) {
         priority = 4;
         category = 'scatter';
       } else if (!skinPixel) {
@@ -740,12 +738,12 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
     const normY = (rawY - bounds.top) / bounds.height;
 
     // STRICT CHECK: Discard any point outside [0.03, 0.97]!
-    if (normX < 0.03 || normX > 0.97 || normY < 0.03 || normY > 0.86) {
+    if (normX < 0.03 || normX > 0.97 || normY < 0.03 || normY > 0.78) {
       continue;
     }
 
     const isSparkle = Math.random() < 0.12;
-    const size = isSparkle ? 1.4 + Math.random() * 0.6 : 0.85 + Math.random() * 0.5;
+    const size = isSparkle ? 1.0 + Math.random() * 0.35 : 0.6 + Math.random() * 0.3;
 
     allPoints.push({
       x: normX,

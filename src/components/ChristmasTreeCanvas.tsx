@@ -1024,10 +1024,6 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         ? Math.pow(portraitProgress, 1.45)
         : portraitProgress;
 
-      // Color fade factors: smooth shift from pure white (#FFFFFF) back to warm tree colors
-      const whiteGlow = Math.pow(portraitProgress, 1.3);
-      const treeColorGlow = Math.max(0, 1 - whiteGlow);
-
       // Pre-calculate frame constants outside particle loop for silky 60 FPS performance
       const sinYawParallax = Math.sin(yaw * 0.55) * portraitWidth * 0.04;
       const sinPitchParallax = -Math.sin(pitch * 0.55) * portraitHeight * 0.04;
@@ -1103,49 +1099,49 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
           }
         }
 
-        const portraitRadius = Math.max(0.7, Math.min(2.6, pt.portraitSize || 1.2));
+        const portraitRadius = Math.max(0.5, Math.min(1.6, pt.portraitSize || 0.85));
         const treeRadius = Math.max(0.5, treeSize * 0.5);
         const radius = treeRadius * (1 - portraitProgress) + portraitRadius * portraitProgress;
 
-        // 1. Warm tree colors (greens, golds, scarlets): smoothly fades back in as it nears tree
-        if (!isTemp && treeColorGlow > 0.005) {
-          const twinkle = 0.5 + 0.5 * Math.sin(time * 4 + pt.phase);
-          const spark = Math.pow(Math.max(0, Math.sin(time * 2.2 + pt.phase * 2)), 16);
-          const glow = (0.4 + 0.35 * twinkle + 0.6 * spark) * heartbeat;
-          const baseAlpha = Math.min(1, glow * (0.4 + 0.6 * depth) * pt.fade * (0.4 + 0.6 * intro));
-          const treeAlpha = baseAlpha * treeColorGlow;
-          if (treeAlpha > 0.005) {
-            ctx.globalAlpha = treeAlpha;
-            const originalSprite = sprites[pt.c] || sprites[0];
-            const drawSize = radius * 2;
-            ctx.drawImage(originalSprite, cx - drawSize / 2, cy - drawSize / 2, drawSize, drawSize);
+        // Single-pass draw: smoothly transitions from tree sprite to starlight sprite without doubling draw calls
+        if (portraitProgress < 0.45) {
+          if (!isTemp) {
+            const twinkle = 0.5 + 0.5 * Math.sin(time * 4 + pt.phase);
+            const spark = Math.pow(Math.max(0, Math.sin(time * 2.2 + pt.phase * 2)), 16);
+            const glow = (0.4 + 0.35 * twinkle + 0.6 * spark) * heartbeat;
+            const baseAlpha = Math.min(1, glow * (0.4 + 0.6 * depth) * pt.fade * (0.4 + 0.6 * intro));
+            const treeAlpha = baseAlpha * (1 - portraitProgress * 2.1);
+            if (treeAlpha > 0.005) {
+              ctx.globalAlpha = treeAlpha;
+              const originalSprite = sprites[pt.c] || sprites[0];
+              const drawSize = radius * 2;
+              ctx.drawImage(originalSprite, cx - drawSize / 2, cy - drawSize / 2, drawSize, drawSize);
+            }
           }
-        }
-
-        // 2. Pure brilliant white stardust (#FFFFFF): crisp, clear, luminous starlight
-        if (whiteGlow > 0.005) {
+        } else {
           const pSpeed = pt.portraitSpeed || 2.4;
           const pTwinkle = 0.82 + 0.18 * Math.sin(time * pSpeed + pt.phase * 3.7);
           const lum = pt.portraitLight ?? 0.75;
           const lumAlpha = 0.52 + 0.48 * Math.pow(lum, 1.1);
           const tempFadeMult = isTemp ? tempReturnFactor : 1.0;
+          const whitePhaseFactor = Math.min(1.0, (portraitProgress - 0.45) * 2.2);
           const finalAlpha =
             Math.min(1.0, Math.max(0.42, lumAlpha * pTwinkle)) *
-            whiteGlow *
+            whitePhaseFactor *
             priorityCullMult *
             tempFadeMult;
 
           if (finalAlpha > 0.008) {
             ctx.globalAlpha = finalAlpha;
-            const drawSize = Math.max(3.2, radius * 3.4);
+            const drawSize = Math.max(2.4, radius * 2.8);
             ctx.drawImage(starlightSprite, cx - drawSize / 2, cy - drawSize / 2, drawSize, drawSize);
 
-            // Sparkling diamond star glints: pure GPU sprite blit, ZERO line mesh artifacts!
+            // Sparkling diamond star glints: pure GPU sprite blit
             if (diamondStarSprite && (pt.portraitIsSparkle || (priority === 1 && pTwinkle > 0.96))) {
               const pFlare = Math.pow(Math.max(0, Math.sin(time * 1.8 + pt.phase * 4.9)), 12);
-              if (pFlare > 0.35) {
-                const flareSize = drawSize * (1.8 + 1.2 * pFlare);
-                ctx.globalAlpha = finalAlpha * 0.9 * pFlare;
+              if (pFlare > 0.4) {
+                const flareSize = drawSize * (1.6 + 1.0 * pFlare);
+                ctx.globalAlpha = finalAlpha * 0.85 * pFlare;
                 ctx.drawImage(diamondStarSprite, cx - flareSize / 2, cy - flareSize / 2, flareSize, flareSize);
               }
             }
@@ -1165,7 +1161,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
       }
 
       // Draw a dense, multicolored brown sparkle trunk, revealed from the roots upward.
-      if (scatter < 0.98) {
+      if (scatter < 0.08) {
         ctx.save();
         ctx.globalCompositeOperation = 'lighter';
         const trunkRows = 21;
@@ -1199,13 +1195,15 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         ctx.restore();
       }
 
-      if (frameTheme.id === 'snowglobe') {
+      if (frameTheme.id === 'snowglobe' && scatter < 0.1) {
         drawTreeDecorations(ctx, projectFrame, time, intro, scatter);
       }
-      drawGiftModels(ctx, projectFrame, sprites, time, intro, scatter, w, h);
+      if (scatter < 0.1) {
+        drawGiftModels(ctx, projectFrame, sprites, time, intro, scatter, w, h);
+      }
 
       // 6. Orbiting Points (fairy dust)
-      if (frameSettings.showOrbits) {
+      if (frameSettings.showOrbits && scatter < 0.2) {
         ctx.globalCompositeOperation = 'lighter';
         const orbits = orbitPointsRef.current;
         for (let i = 0; i < orbits.length; i++) {
@@ -1222,7 +1220,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
       }
 
       // 7. Falling Petals
-      if (frameSettings.showPetals) {
+      if (frameSettings.showPetals && scatter < 0.2) {
         ctx.globalCompositeOperation = 'source-over';
         const petals = petalsRef.current;
         for (let i = 0; i < petals.length; i++) {

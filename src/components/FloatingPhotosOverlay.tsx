@@ -112,7 +112,8 @@ export const FloatingPhotosOverlay: React.FC<Props> = ({
   }
 
   const cardBaseWidth = width < 640 ? 88 : 104;
-  const orbitRadius = Math.min(width * 0.40, height * 0.38);
+  const orbitRadiusX = Math.min(width * 0.43, Math.max(160, width * 0.5 - 55));
+  const orbitRadiusY = Math.min(height * 0.26, 185);
   const rawProjectedCards = photos.map((photo) => {
     const position = photoOrbitPositionsRef.current.get(photo.id)!;
     const angle = orbitTime * orbitSpeed - smoothedYaw;
@@ -122,8 +123,12 @@ export const FloatingPhotosOverlay: React.FC<Props> = ({
     const orbitY = position.x * sinAngle + position.y * cosAngle;
     const bob = Math.sin(orbitTime * 0.8 + position.phase) * 0.025;
     const orbitZ = Math.sin(angle + position.phase);
-    const screenX = width / 2 + orbitX * orbitRadius;
-    const screenY = height / 2 + (orbitY + bob) * orbitRadius;
+
+    // Lateral displacement: keeps photo polaroids on left & right flanks, NEVER occluding Chiara's face or head!
+    const signX = orbitX >= 0 ? 1 : -1;
+    const safeOrbitX = signX * (0.52 + 0.48 * Math.abs(orbitX));
+    const screenX = width / 2 + safeOrbitX * orbitRadiusX;
+    const screenY = height * 0.46 + (orbitY * 0.72 + bob) * orbitRadiusY;
     const effRadius = (photo.radius + 2.5) * (1 + scatter * 0.4);
     const proj = project(
       orbitX * effRadius,
