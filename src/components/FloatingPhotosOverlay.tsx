@@ -94,11 +94,6 @@ export const FloatingPhotosOverlay: React.FC<Props> = ({
   // Photos appear ONLY when the face is shown (scatter -> 1), and NOT when the tree is formed (scatter -> 0)
   const revealProgress = Math.max(0, Math.min(1, (scatter - 0.25) / 0.55));
   const photoVisibility = revealProgress * revealProgress * (3 - 2 * revealProgress);
-
-  // Performance guard: return null when completely invisible to eliminate DOM recalculations
-  if (photoVisibility <= 0.001 && !isPhotoOpen && !isPhotoClosing) {
-    return null;
-  }
   const photosReady = introProgress >= 0.85 && scatter >= 0.65;
   const photoIds = photos.map((photo) => photo.id).join('|');
   if (photoIdsRef.current !== photoIds) {
@@ -306,7 +301,8 @@ export const FloatingPhotosOverlay: React.FC<Props> = ({
       )}
 
       {/* 3D Floating Memory Polaroid Cards */}
-      {projectedCards.map(({ photo, proj, screenX, screenY, scale: baseScale, isFront, isUnderCursor }) => {
+      {(photoVisibility > 0.001 || isPhotoOpen || isPhotoClosing) &&
+        projectedCards.map(({ photo, proj, screenX, screenY, scale: baseScale, isFront, isUnderCursor }) => {
         // If card is too far behind, hide or make deeply faded
         const depthOpacity = photosReady
           ? 1
