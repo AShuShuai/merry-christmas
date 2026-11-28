@@ -49,6 +49,7 @@ export interface PhotoTransitionOrigin {
   z: number;
   scale: number;
   tilt?: number;
+  yaw?: number;
 }
 
 export interface HandGestureState {

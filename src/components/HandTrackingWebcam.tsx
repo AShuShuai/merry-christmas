@@ -12,18 +12,17 @@ export const HandTrackingWebcam = React.memo<Props>(({ onGesture }) => {
 
   useEffect(() => {
     let isMounted = true;
-    const start = async () => {
-      if (videoRef.current && canvasRef.current) {
-        await handTracker.init(videoRef.current, canvasRef.current, (st) => {
-          if (isMounted) onGesture(st);
-        });
-      }
-    };
-
-    start();
+    // Defer MediaPipe WASM/webcam init slightly so the tree & "Merry Christmas" intro plays at locked silky FPS!
+    const timerId = window.setTimeout(() => {
+      if (!isMounted || !videoRef.current || !canvasRef.current) return;
+      void handTracker.init(videoRef.current, canvasRef.current, (st) => {
+        if (isMounted) onGesture(st);
+      });
+    }, 1700);
 
     return () => {
       isMounted = false;
+      window.clearTimeout(timerId);
       handTracker.stop();
     };
   }, [onGesture]);

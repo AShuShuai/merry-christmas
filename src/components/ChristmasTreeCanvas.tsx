@@ -920,18 +920,24 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
       onPortraitStatusUpdate?.('error', error.message);
       console.error('Unable to process the tree portrait image.', error);
     };
+    let startDelayId: number | null = null;
     image.onload = () => {
-      void processPortraitImage(image)
-        .then((targets) => {
-          if (portraitRequestRef.current !== requestId) return;
-          portraitTargetsRef.current = targets;
-          portraitAspectRef.current = targets.aspect;
-          assignPortraitTargets(treePointsRef.current, targets, tempStarPointsRef);
-          onPortraitStatusUpdate?.('ready');
-        })
-        .catch((error: unknown) => {
-          fail(error instanceof Error ? error : new Error(String(error)));
-        });
+      // Stagger portrait CPU/WASM processing right after the opening intro so frame 1-60 never stutter!
+      const delayMs = requestId === 1 ? 2250 : 60;
+      startDelayId = window.setTimeout(() => {
+        if (portraitRequestRef.current !== requestId) return;
+        void processPortraitImage(image)
+          .then((targets) => {
+            if (portraitRequestRef.current !== requestId) return;
+            portraitTargetsRef.current = targets;
+            portraitAspectRef.current = targets.aspect;
+            assignPortraitTargets(treePointsRef.current, targets, tempStarPointsRef);
+            onPortraitStatusUpdate?.('ready');
+          })
+          .catch((error: unknown) => {
+            fail(error instanceof Error ? error : new Error(String(error)));
+          });
+      }, delayMs);
     };
     image.onerror = () => {
       fail(new Error(`Unable to load tree portrait image: ${settings.portraitUrl}`));
@@ -941,6 +947,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
 
     return () => {
       portraitRequestRef.current += 1;
+      if (startDelayId !== null) window.clearTimeout(startDelayId);
       image.onload = null;
       image.onerror = null;
     };
@@ -1032,10 +1039,9 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
     handleResize();
     window.addEventListener('resize', handleResize);
 
-    if (startTimeRef.current === 0) {
-      startTimeRef.current = performance.now();
-      introStartRef.current = 0;
-    }
+    // Anchor intro cleanly to the very first rendered frame (avoids first-frame dt jump on page load!)
+    startTimeRef.current = 0;
+    introStartRef.current = 0;
     lastTimeRef.current = 0;
 
     const render = () => {
@@ -1053,8 +1059,12 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
       }
       lastRenderMsRef.current = currentTimeMs;
 
+      if (startTimeRef.current === 0) {
+        startTimeRef.current = currentTimeMs;
+        introStartRef.current = 0;
+      }
       const time = (currentTimeMs - startTimeRef.current) / 1000;
-      const dt = lastTimeRef.current ? Math.min(0.05, time - lastTimeRef.current) : 0.025;
+      const dt = lastTimeRef.current ? Math.min(0.04, time - lastTimeRef.current) : 0.024;
       lastTimeRef.current = time;
 
       const { w, h, focal } = dimRef.current;

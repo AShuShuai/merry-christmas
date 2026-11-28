@@ -16,11 +16,15 @@ function getPhotoOrigin(
   y: number,
   z: number,
   scale: number,
-  tilt: number = 0
+  tilt: number = 0,
+  yaw: number = 0,
+  exactWidth?: number
 ): PhotoTransitionOrigin | undefined {
   if (!element) return undefined;
-  const { left, top, width, height } = element.getBoundingClientRect();
-  return { left, top, width, height, x, y, z, scale, tilt };
+  const { left, top, width: boxW, height: boxH } = element.getBoundingClientRect();
+  // Use unrotated visual width when available so 3D-tilted cards dock pixel-perfectly with zero scale snap!
+  const width = exactWidth ?? boxW;
+  return { left, top, width, height: boxH, x, y, z, scale, tilt, yaw };
 }
 
 interface Props {
@@ -65,6 +69,8 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
   const pinchOpenDistanceRef = useRef<number | null>(null);
   const wasPinchingRef = useRef<boolean>(false);
   const lastPinchTriggerAtRef = useRef<number>(0);
+  const prevOpenPhotoIdRef = useRef<string | undefined>(undefined);
+  const landedPhotoRef = useRef<{ id: string; landedAt: number } | null>(null);
   const photoCardElementsRef = useRef<Map<string, HTMLDivElement>>(new Map());
   const photoOrbitPositionsRef = useRef<Map<string, OrbitPosition>>(new Map());
   const photoIdsRef = useRef('');
@@ -172,7 +178,14 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
       .filter((card) => card.isUnderCursor)
       .sort((a, b) => a.cursorDist - b.cursorDist)[0] ?? null;
   const photoUnderCursor = photoUnderCursorCard?.photo ?? null;
+  const cardVisualBaseW = width < 640 ? 108 : 132;
   const selectedCard = projectedCards.find((card) => card.photo.id === selectedPhotoId);
+
+  // Track exact moment a photo finishes flying back so handoff has ZERO opacity flash + gentle dynamic settle!
+  if (prevOpenPhotoIdRef.current && !isPhotoOpen) {
+    landedPhotoRef.current = { id: prevOpenPhotoIdRef.current, landedAt: now };
+  }
+  prevOpenPhotoIdRef.current = isPhotoOpen ? selectedPhotoId : undefined;
 
   useEffect(() => {
     if (!isPhotoOpen || !selectedPhotoId) return;
@@ -182,7 +195,9 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
       selectedCard?.screenY ?? height / 2,
       selectedCard?.proj.z ?? 0,
       selectedCard?.scale ?? 1,
-      selectedCard?.tilt ?? 0
+      selectedCard?.tilt ?? 0,
+      selectedCard?.yaw3d ?? 0,
+      cardVisualBaseW * (selectedCard?.scale ?? 1)
     );
     if (origin) onPhotoOriginUpdate(selectedPhotoId, origin);
   }, [
@@ -191,11 +206,13 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
     orbitTime,
     width,
     height,
+    cardVisualBaseW,
     selectedCard?.screenX,
     selectedCard?.screenY,
     selectedCard?.proj.z,
     selectedCard?.scale,
     selectedCard?.tilt,
+    selectedCard?.yaw3d,
     onPhotoOriginUpdate,
   ]);
 
@@ -256,7 +273,9 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
           photoUnderCursorCard?.screenY ?? height / 2,
           photoUnderCursorCard?.proj.z ?? 0,
           photoUnderCursorCard?.scale ?? 1,
-          photoUnderCursorCard?.tilt ?? 0
+          photoUnderCursorCard?.tilt ?? 0,
+          photoUnderCursorCard?.yaw3d ?? 0,
+          cardVisualBaseW * (photoUnderCursorCard?.scale ?? 1)
         )
       );
     }
@@ -345,6 +364,16 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
           const activeTilt = isHoveredByHand ? 0 : tilt;
           const activeYaw = isHoveredByHand ? 0 : yaw3d;
 
+          // Zero-flash seamless handoff + dynamic landing momentum ripple when a Polaroid flies back home!
+          const landedInfo = landedPhotoRef.current;
+          const landedAgeMs = landedInfo && landedInfo.id === photo.id ? now - landedInfo.landedAt : 9999;
+          const justLanded = landedAgeMs < 650;
+          const landingRipple = justLanded
+            ? Math.exp(-landedAgeMs / 240) * Math.sin((landedAgeMs / 1000) * 14)
+            : 0;
+          const finalTilt = activeTilt + landingRipple * 4.5;
+          const finalScale = activeScale * (1 + Math.max(0, landingRipple) * 0.045);
+
           return (
             <div
               key={photo.id}
@@ -352,7 +381,16 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
                 chimeAudio.playChime(1046.5, 0.15);
                 onSelectPhoto(
                   photo,
-                  getPhotoOrigin(event.currentTarget, screenX, screenY, proj.z, activeScale, activeTilt)
+                  getPhotoOrigin(
+                    event.currentTarget,
+                    screenX,
+                    screenY,
+                    proj.z,
+                    activeScale,
+                    activeTilt,
+                    activeYaw,
+                    cardVisualBaseW * activeScale
+                  )
                 );
               }}
               ref={(element) => {
@@ -363,11 +401,15 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
               style={{
                 left: `${screenX}px`,
                 top: `${screenY}px`,
-                transform: `translate3d(-50%, -50%, 0) rotateY(${activeYaw}deg) rotateZ(${activeTilt.toFixed(
+                transform: `translate3d(-50%, -50%, 0) rotateY(${activeYaw}deg) rotateZ(${finalTilt.toFixed(
                   2
-                )}deg) scale(${activeScale.toFixed(3)})`,
+                )}deg) scale(${finalScale.toFixed(3)})`,
                 opacity,
-                transition: 'opacity 260ms ease, transform 320ms cubic-bezier(0.22, 1, 0.36, 1)',
+                // Zero opacity transition on the landing handoff frame -> ZERO blink/flash!
+                transition:
+                  isSelectedPhotoOpen || landedAgeMs < 140
+                    ? 'none'
+                    : 'opacity 220ms ease, transform 240ms cubic-bezier(0.22, 1, 0.36, 1)',
                 pointerEvents: photosReady && !isSelectedPhotoOpen ? 'auto' : 'none',
                 transformStyle: 'preserve-3d',
               }}
