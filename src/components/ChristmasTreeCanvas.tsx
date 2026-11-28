@@ -547,6 +547,8 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
   const spritesRef = useRef<HTMLCanvasElement[]>([]);
   const starlightSpriteRef = useRef<HTMLCanvasElement | null>(null);
   const goldSparkSpriteRef = useRef<HTMLCanvasElement | null>(null);
+  const rubySparkSpriteRef = useRef<HTMLCanvasElement | null>(null);
+  const emeraldSparkSpriteRef = useRef<HTMLCanvasElement | null>(null);
   const diamondStarSpriteRef = useRef<HTMLCanvasElement | null>(null);
   const supernovaSpriteRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -731,6 +733,8 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
     ]);
     starlightSpriteRef.current = makeStarlightSprite(64);
     goldSparkSpriteRef.current = makeSprite([255, 224, 132], 64);
+    rubySparkSpriteRef.current = makeSprite([239, 72, 72], 64);
+    emeraldSparkSpriteRef.current = makeSprite([34, 197, 94], 64);
     diamondStarSpriteRef.current = makeDiamondStarSprite(64);
     if (!supernovaSpriteRef.current) {
       const sCv = document.createElement('canvas');
@@ -1201,6 +1205,8 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
       const heartbeat = frameSettings.breatheEffect ? 0.9 + 0.1 * Math.pow(Math.max(0, Math.sin(time * 1.8)), 6) : 1;
       const starlightSprite = starlightSpriteRef.current || sprites[0];
       const goldSparkSprite = goldSparkSpriteRef.current || sprites[0];
+      const rubySparkSprite = rubySparkSpriteRef.current || sprites[0];
+      const emeraldSparkSprite = emeraldSparkSpriteRef.current || sprites[0];
       const diamondStarSprite = diamondStarSpriteRef.current;
 
       const tempReturnFactor = isClosing ? Math.max(0, (portraitProgress - 0.28) / 0.72) : 1.0;
@@ -1259,16 +1265,69 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         let cy = treeY;
         let burstEnergy = 0; // peaks during the Big Bang explosion for lens bloom & golden flash
 
+        // ~17% of tree particles (~300 stars) remain suspended in the cosmic background around Chiara's portrait
+        // for atmospheric beauty (upper starlight cosmos + lower festive emerald/gold/ruby horizon mist)!
+        const isBgCosmic = !isTemp && idx % 6 === 0;
+        const bgSlot = Math.floor(idx / 6);
+        const bgZone = bgSlot % 10; // 0..4 = upper cosmic white stars, 5..7 = festive lower horizon mist, 8..9 = deep outer bokeh
+
+        // Festive tree sprite for this particle (mixes its original tree color + ruby red ornament accents)
+        const festiveSprite =
+          idx % 7 === 0
+            ? rubySparkSprite
+            : idx % 5 === 0
+              ? goldSparkSprite
+              : sprites[pt.c] || emeraldSparkSprite;
+
         // BIG BANG 3-ACT FLIGHT TRAJECTORY
         if (hasPortrait && !isPureTree && localP > 0.001) {
-          const pZ = pt.portraitZ || 0;
-          const volOffsetX = sinYawParallax * pZ;
-          const volOffsetY = sinPitchParallax * pZ;
-          const floatOffset = Math.sin(time * 1.25 + pt.phase) * 0.7;
-          const jitX = (pt.portraitJitterX || 0) * portraitWidth;
-          const jitY = (pt.portraitJitterY || 0) * portraitHeight;
-          const targetX = portraitLeft + pt.portraitX * portraitWidth + (volOffsetX + floatOffset + jitX);
-          const targetY = portraitTop + pt.portraitY * portraitHeight + (volOffsetY + floatOffset * 0.7 + jitY);
+          let targetX = 0;
+          let targetY = 0;
+
+          if (isBgCosmic) {
+            // Planned artistic cosmic background placement (strictly OUTSIDE central face/hair silhouette!)
+            const h1 = (pt.phase * 1.6180339 + idx * 0.371) % 1;
+            const h2 = (pt.t * 2.7182818 + pt.phase * 0.73) % 1;
+            const bgDepth = -0.75 + h1 * 1.5;
+            const driftX = Math.sin(time * (0.38 + h2 * 0.35) + pt.phase) * (6 + h1 * 8) + sinYawParallax * bgDepth * 0.9;
+            const driftY = Math.cos(time * (0.32 + h1 * 0.3) + pt.phase * 1.3) * (5 + h2 * 6) + sinPitchParallax * bgDepth * 0.9;
+
+            if (bgZone < 5) {
+              // Zone A: Upper & flanking starlight cosmos feathering out from Chiara's hair
+              const onLeft = bgSlot % 2 === 0;
+              const sideX = onLeft
+                ? w * (0.04 + Math.pow(h1, 0.78) * 0.34)
+                : w * (0.96 - Math.pow(h1, 0.78) * 0.34);
+              const skyY = h * (0.04 + h2 * 0.56);
+              targetX = sideX + driftX;
+              targetY = skyY + driftY;
+            } else if (bgZone < 8) {
+              // Zone B: Ethereal festive lower-horizon stardust mist flanking her shoulders (emerald/gold left, ruby/amber right)
+              const onLeft = bgSlot % 2 === 0;
+              const mistX = onLeft
+                ? w * (0.04 + h1 * 0.30)
+                : w * (0.96 - h1 * 0.30);
+              const mistY = h * (0.60 + h2 * 0.24);
+              targetX = mistX + driftX * 1.15;
+              targetY = mistY + driftY * 0.7;
+            } else {
+              // Zone C: Deep outer perimeter stars across top & sides
+              const angle = pt.phase * 2.3 + h1 * TAU;
+              const rx = w * (0.36 + h2 * 0.13);
+              const ry = h * (0.34 + h1 * 0.12);
+              targetX = centerX + Math.cos(angle) * rx + driftX;
+              targetY = h * 0.44 + Math.sin(angle) * ry + driftY;
+            }
+          } else {
+            const pZ = pt.portraitZ || 0;
+            const volOffsetX = sinYawParallax * pZ;
+            const volOffsetY = sinPitchParallax * pZ;
+            const floatOffset = Math.sin(time * 1.25 + pt.phase) * 0.7;
+            const jitX = (pt.portraitJitterX || 0) * portraitWidth;
+            const jitY = (pt.portraitJitterY || 0) * portraitHeight;
+            targetX = portraitLeft + pt.portraitX * portraitWidth + (volOffsetX + floatOffset + jitX);
+            targetY = portraitTop + pt.portraitY * portraitHeight + (volOffsetY + floatOffset * 0.7 + jitY);
+          }
 
           if (isPurePortrait || localP >= 0.999) {
             cx = targetX;
@@ -1278,8 +1337,8 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
             const burstAngle = pt.phase * 3.17 + pt.t * 19.7 + (idx % 13) * 0.48;
             const frac = (pt.phase * 1.61803 + pt.t * 2.71828) % 1;
             const burstDist = maxDim * (0.16 + 0.54 * Math.pow(frac, 0.68));
-            const burstX = centerX + Math.cos(burstAngle) * burstDist;
-            const burstY = centerY + Math.sin(burstAngle) * burstDist * 0.72;
+            const burstX = isBgCosmic ? targetX : centerX + Math.cos(burstAngle) * burstDist;
+            const burstY = isBgCosmic ? targetY : centerY + Math.sin(burstAngle) * burstDist * 0.72;
 
             // Compressed singularity point right before detonation
             const chargeX = treeX + (centerX - treeX) * 0.48;
@@ -1296,7 +1355,6 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
               // ACT 2: THE BIG BANG EXPLOSION! (fast outward radial blast -> zero-gravity starfield hang!)
               const u = (localP - 0.16) / 0.38;
               const blast = 1 - Math.pow(1 - u, 3.4);
-              // Tiny cosmic rotation drift as particles hang at apogee
               const drift = Math.sin(u * Math.PI) * 0.08;
               const bx = burstX - centerX;
               const by = burstY - centerY;
@@ -1306,11 +1364,9 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
               cx = chargeX + (rotBurstX - chargeX) * blast;
               cy = chargeY + (rotBurstY - chargeY) * blast;
 
-              // Instant radial speed peaks right after detonation (u ~ 0.0 -> 0.5)
               const radialSpeed = Math.pow(1 - u, 2.1);
               burstEnergy = 0.25 + 0.75 * Math.sin(Math.PI * Math.min(1, u * 1.15));
 
-              // Record blazing outward Big Bang light-speed streaks!
               if (radialSpeed > 0.12 && idx % 3 === 0) {
                 const dirX = rotBurstX - chargeX;
                 const dirY = rotBurstY - chargeY;
@@ -1318,35 +1374,43 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
                 blastComets.push(cx, cy, cx - dirX * streakLen, cy - dirY * streakLen);
               }
             } else {
-              // ACT 3: MAGNETIC COSMIC REFORMATION! (vast starfield swoops inward & forms Chiara's face!)
+              // ACT 3: MAGNETIC COSMIC REFORMATION!
+              // Portrait stars swoop inward to sculpt Chiara's face; background stars gently settle in space!
               const u = (localP - 0.54) / 0.46;
               const ease = u * u * u * (u * (u * 6 - 15) + 10);
               const midCurve = Math.sin(Math.PI * u);
 
-              // Subtle curved orbital swoop so incoming stars flow gracefully like gravity streams
-              const vx = targetX - burstX;
-              const vy = targetY - burstY;
-              const curveSign = idx % 2 === 0 ? 1 : -1;
-              const curveAmp = midCurve * 0.14 * curveSign;
+              if (isBgCosmic) {
+                // Background particles stay gently suspended right where the Big Bang carried them!
+                cx = targetX + Math.sin(u * Math.PI + pt.phase) * 6;
+                cy = targetY + Math.cos(u * Math.PI + pt.phase) * 4;
+                burstEnergy = (1 - u) * 0.35;
+              } else {
+                const vx = targetX - burstX;
+                const vy = targetY - burstY;
+                const curveSign = idx % 2 === 0 ? 1 : -1;
+                const curveAmp = midCurve * 0.14 * curveSign;
 
-              cx = burstX + vx * ease - vy * curveAmp;
-              cy = burstY + vy * ease + vx * curveAmp;
-              burstEnergy = midCurve * 0.42;
+                cx = burstX + vx * ease - vy * curveAmp;
+                cy = burstY + vy * ease + vx * curveAmp;
+                burstEnergy = midCurve * 0.42;
 
-              // Record crisp incoming white starlight trails converging into her face!
-              const inwardSpeed = midCurve * midCurve;
-              if (inwardSpeed > 0.18 && idx % 3 === 0) {
-                const streakLen = inwardSpeed * (isClosing ? -0.11 : 0.12);
-                reformComets.push(cx, cy, cx - vx * streakLen, cy - vy * streakLen);
+                const inwardSpeed = midCurve * midCurve;
+                if (inwardSpeed > 0.18 && idx % 3 === 0) {
+                  const streakLen = inwardSpeed * (isClosing ? -0.11 : 0.12);
+                  reformComets.push(cx, cy, cx - vx * streakLen, cy - vy * streakLen);
+                }
               }
             }
           }
         }
 
-        // UNIFIED PARTICLE RENDERING: the exact same particle smoothly transforms color!
-        // Tree colors -> superheated golden supernova burst -> pure white starlight reforming into Chiara!
-        const portraitRadius =
-          priority === 1
+        // UNIFIED PARTICLE RENDERING
+        const portraitRadius = isBgCosmic
+          ? bgZone >= 5 && bgZone < 8
+            ? 0.9 + (pt.phase % 0.85) // Soft festive horizon stardust mist
+            : 0.7 + (pt.phase % 0.95) // Crisp cosmic background stars
+          : priority === 1
             ? Math.max(0.6, Math.min(1.1, pt.portraitSize || 0.85))
             : Math.max(0.65, Math.min(1.25, pt.portraitSize || 0.95));
         const treeRadius = Math.max(0.5, treeSize * 0.5);
@@ -1369,45 +1433,105 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
             }
           }
         } else if (localP >= 0.99) {
-          // Pure Portrait state (1 draw call + occasional diamond flare)
-          const pSpeed = pt.portraitSpeed || 2.4;
-          const pTwinkle = 0.85 + 0.15 * Math.sin(time * pSpeed + pt.phase * 3.7);
-          const pLight = pt.portraitLight ?? (priority === 1 ? 0.95 : 0.45);
-          const baseAlpha =
-            priority === 1
-              ? Math.min(1.0, Math.max(0.85, pLight * pTwinkle))
-              : Math.min(0.70, Math.max(0.25, pLight * pTwinkle));
-          const overlayBalance = hasHDPortraitBase ? (priority === 1 ? 0.65 : 0.48) : 1.0;
-          const finalAlpha = baseAlpha * overlayBalance * (isTemp ? tempReturnFactor : 1.0);
+          // Pure Portrait state: Chiara's shimmering portrait + lingering cosmic background & festive mist!
+          if (isBgCosmic) {
+            const bgTwinkle = 0.55 + 0.45 * Math.sin(time * (1.4 + (bgSlot % 5) * 0.45) + pt.phase * 2.3);
+            if (bgZone >= 5 && bgZone < 8) {
+              // Zone B: Subtle festive emerald/gold (left) & ruby/amber (right) stardust mist flanking her shoulders!
+              const onLeft = bgSlot % 2 === 0;
+              const mistSprite = onLeft
+                ? bgSlot % 4 === 0
+                  ? emeraldSparkSprite
+                  : goldSparkSprite
+                : bgSlot % 4 === 1
+                  ? rubySparkSprite
+                  : goldSparkSprite;
+              const mistAlpha = (0.24 + 0.32 * bgTwinkle) * (0.75 + 0.25 * Math.sin(time + pt.phase));
+              const drawSize = Math.max(2.6, portraitRadius * 3.1);
+              ctx.globalAlpha = mistAlpha;
+              ctx.drawImage(mistSprite, cx - drawSize / 2, cy - drawSize / 2, drawSize, drawSize);
+            } else {
+              // Zone A & C: Delicate twinkling white cosmos stars + subtle diamond glints
+              const starAlpha = 0.28 + 0.52 * bgTwinkle;
+              const drawSize = Math.max(2.2, portraitRadius * 2.5);
+              ctx.globalAlpha = starAlpha;
+              ctx.drawImage(starlightSprite, cx - drawSize / 2, cy - drawSize / 2, drawSize, drawSize);
 
-          if (finalAlpha > 0.008) {
-            ctx.globalAlpha = finalAlpha;
-            const drawSize = Math.max(2.0, portraitRadius * 2.2);
-            ctx.drawImage(starlightSprite, cx - drawSize / 2, cy - drawSize / 2, drawSize, drawSize);
+              if (diamondStarSprite && bgSlot % 5 === 0) {
+                const bgFlare = Math.pow(Math.max(0, Math.sin(time * 1.3 + pt.phase * 3.1)), 10);
+                if (bgFlare > 0.3) {
+                  const flareSize = drawSize * (1.8 + 1.2 * bgFlare);
+                  ctx.globalAlpha = starAlpha * 0.85 * bgFlare;
+                  ctx.drawImage(diamondStarSprite, cx - flareSize / 2, cy - flareSize / 2, flareSize, flareSize);
+                }
+              }
+            }
+          } else {
+            const pSpeed = pt.portraitSpeed || 2.4;
+            const pTwinkle = 0.85 + 0.15 * Math.sin(time * pSpeed + pt.phase * 3.7);
+            const pLight = pt.portraitLight ?? (priority === 1 ? 0.95 : 0.45);
+            const baseAlpha =
+              priority === 1
+                ? Math.min(1.0, Math.max(0.85, pLight * pTwinkle))
+                : Math.min(0.70, Math.max(0.25, pLight * pTwinkle));
+            const overlayBalance = hasHDPortraitBase ? (priority === 1 ? 0.65 : 0.48) : 1.0;
+            const finalAlpha = baseAlpha * overlayBalance * (isTemp ? tempReturnFactor : 1.0);
 
-            if (diamondStarSprite && (pt.portraitIsSparkle || (priority === 1 && pTwinkle > 0.96))) {
-              const pFlare = Math.pow(Math.max(0, Math.sin(time * 1.8 + pt.phase * 4.9)), 12);
-              if (pFlare > 0.35) {
-                const flareSize = drawSize * (1.5 + 0.9 * pFlare);
-                ctx.globalAlpha = finalAlpha * 0.9 * pFlare;
-                ctx.drawImage(diamondStarSprite, cx - flareSize / 2, cy - flareSize / 2, flareSize, flareSize);
+            if (finalAlpha > 0.008) {
+              ctx.globalAlpha = finalAlpha;
+              const drawSize = Math.max(2.0, portraitRadius * 2.2);
+              ctx.drawImage(starlightSprite, cx - drawSize / 2, cy - drawSize / 2, drawSize, drawSize);
+
+              if (diamondStarSprite && (pt.portraitIsSparkle || (priority === 1 && pTwinkle > 0.96))) {
+                const pFlare = Math.pow(Math.max(0, Math.sin(time * 1.8 + pt.phase * 4.9)), 12);
+                if (pFlare > 0.35) {
+                  const flareSize = drawSize * (1.5 + 0.9 * pFlare);
+                  ctx.globalAlpha = finalAlpha * 0.9 * pFlare;
+                  ctx.drawImage(diamondStarSprite, cx - flareSize / 2, cy - flareSize / 2, flareSize, flareSize);
+                }
               }
             }
           }
+        } else if (isClosing) {
+          // RETURN BIG BANG (Portrait -> Tree):
+          // RIGHT DURING THE EXPLOSION (before recombining into the tree!), particles ALREADY shift
+          // from white starlight into vibrant Christmas tree colors (emerald green, ruby red, warm gold)!
+          const drawSize = Math.max(2.4, radius * 2.45);
+          const tempFadeMult = isTemp ? tempReturnFactor : 1.0;
+
+          // White fades out fast during initial shatter (1.0 -> 0.56)
+          const whiteWeight = Math.max(0, Math.min(1, (localP - 0.56) / 0.38));
+          // Festive Christmas tree colors (green, red, gold) ignite ALREADY during the explosion (0.94 -> 0.50 -> 0.0)!
+          const festiveColorWeight = Math.max(0, Math.min(1, (0.94 - localP) / 0.36));
+
+          if (whiteWeight > 0.02) {
+            ctx.globalAlpha = Math.min(0.95, (0.75 + 0.25 * burstEnergy) * whiteWeight * tempFadeMult);
+            ctx.drawImage(starlightSprite, cx - drawSize / 2, cy - drawSize / 2, drawSize, drawSize);
+          }
+
+          if (!isTemp && festiveColorWeight > 0.02) {
+            const festiveSize = drawSize * (1.0 + 0.32 * burstEnergy);
+            ctx.globalAlpha = Math.min(1, (0.72 + 0.28 * burstEnergy) * pt.fade * festiveColorWeight);
+            ctx.drawImage(festiveSprite, cx - festiveSize / 2, cy - festiveSize / 2, festiveSize, festiveSize);
+          }
+
+          // Subtle golden sparkle highlights at explosion peak
+          if (diamondStarSprite && localP > 0.28 && localP < 0.78 && (pt.portraitIsSparkle || idx % 16 === 0)) {
+            const flareSize = drawSize * (1.6 + 0.9 * burstEnergy);
+            ctx.globalAlpha = Math.min(0.85, burstEnergy * 0.75 * tempFadeMult);
+            ctx.drawImage(diamondStarSprite, cx - flareSize / 2, cy - flareSize / 2, flareSize, flareSize);
+          }
         } else {
-          // ACTIVE BIG BANG COLOR MORPH:
-          // Act 1 (0..0.16): Tree color charges hot into golden white
-          // Act 2 (0.16..0.54): Blazing golden-white Big Bang stardust across the entire sky!
-          // Act 3 (0.54..1.00): Pure crisp diamond white converging into Chiara's face!
+          // OPENING BIG BANG (Tree -> Portrait):
+          // Tree colors -> superheated golden supernova burst -> pure white starlight reforming into Chiara (+ festive bg mist)!
           const drawSize = Math.max(2.2, radius * 2.35);
           const tempFadeMult = isTemp ? tempReturnFactor : 1.0;
 
-          // 1. Original Tree Color Sprite fades smoothly out during the detonation (0% -> 42%)
+          // 1. Original Tree Color Sprite fades smoothly out during detonation (0% -> 42%)
           const treeColorWeight = Math.max(0, 1 - localP * 2.35);
           if (!isTemp && treeColorWeight > 0.02) {
             ctx.globalAlpha = Math.min(1, (0.7 + 0.3 * depth) * pt.fade * treeColorWeight);
-            const originalSprite = sprites[pt.c] || sprites[0];
-            ctx.drawImage(originalSprite, cx - drawSize / 2, cy - drawSize / 2, drawSize, drawSize);
+            ctx.drawImage(festiveSprite, cx - drawSize / 2, cy - drawSize / 2, drawSize, drawSize);
           }
 
           // 2. Superheated Golden Big Bang Spark peaks during charge & explosion (0.06 -> 0.65)
@@ -1418,18 +1542,32 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
             ctx.drawImage(goldSparkSprite, cx - goldSize / 2, cy - goldSize / 2, goldSize, goldSize);
           }
 
-          // 3. Pure White Diamond Starlight ignites at detonation (0.14 -> 1.0)
-          const whiteRise = Math.max(0, Math.min(1, (localP - 0.14) / 0.42));
-          if (whiteRise > 0.02) {
+          // 3. Target color rises from detonation (0.14 -> 1.0):
+          // Festive horizon mist stays subtly emerald/ruby/gold; cosmos & portrait become crisp pure white!
+          const targetRise = Math.max(0, Math.min(1, (localP - 0.14) / 0.42));
+          if (targetRise > 0.02) {
+            const isMistBg = isBgCosmic && bgZone >= 5 && bgZone < 8;
+            const onLeft = bgSlot % 2 === 0;
+            const destSprite = isMistBg
+              ? onLeft
+                ? bgSlot % 4 === 0
+                  ? emeraldSparkSprite
+                  : goldSparkSprite
+                : bgSlot % 4 === 1
+                  ? rubySparkSprite
+                  : goldSparkSprite
+              : starlightSprite;
             const pLight = pt.portraitLight ?? (priority === 1 ? 0.95 : 0.55);
             const settleMult = localP > 0.72 ? (localP - 0.72) / 0.28 : 0;
-            const targetAlpha =
-              (priority === 1 ? Math.max(0.82, pLight) : Math.max(0.32, pLight)) *
-              (hasHDPortraitBase ? (priority === 1 ? 0.68 : 0.5) : 1.0);
-            // Bright sparkling starfield during Big Bang & hang, tightening smoothly to exact portrait brightness on landing
+            const targetAlpha = isBgCosmic
+              ? isMistBg
+                ? 0.42
+                : 0.55
+              : (priority === 1 ? Math.max(0.82, pLight) : Math.max(0.32, pLight)) *
+                (hasHDPortraitBase ? (priority === 1 ? 0.68 : 0.5) : 1.0);
             const flightAlpha = 0.85 * (1 - settleMult) + targetAlpha * settleMult;
-            ctx.globalAlpha = Math.min(1, flightAlpha * whiteRise * tempFadeMult);
-            ctx.drawImage(starlightSprite, cx - drawSize / 2, cy - drawSize / 2, drawSize, drawSize);
+            ctx.globalAlpha = Math.min(1, flightAlpha * targetRise * tempFadeMult);
+            ctx.drawImage(destSprite, cx - drawSize / 2, cy - drawSize / 2, drawSize, drawSize);
           }
 
           // 4. Sparkling 4-point diamond stars during the Big Bang burst & zero-G starfield!
@@ -1473,7 +1611,7 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         ctx.restore();
       }
 
-      // Batched GPU Stroke 2: Sleek White Incoming Gravity Reformation Streaks!
+      // Batched GPU Stroke 2: Incoming Gravity Reformation Streaks (crisp white -> portrait, festive gold -> tree!)
       if (reformComets.length > 0) {
         ctx.save();
         ctx.globalCompositeOperation = 'lighter';
@@ -1483,9 +1621,9 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
           ctx.moveTo(reformComets[s], reformComets[s + 1]);
           ctx.lineTo(reformComets[s + 2], reformComets[s + 3]);
         }
-        ctx.globalAlpha = 0.38;
-        ctx.strokeStyle = '#e8f4ff';
-        ctx.lineWidth = 1.25;
+        ctx.globalAlpha = isClosing ? 0.42 : 0.38;
+        ctx.strokeStyle = isClosing ? '#ffd984' : '#e8f4ff';
+        ctx.lineWidth = 1.3;
         ctx.stroke();
         ctx.restore();
       }
