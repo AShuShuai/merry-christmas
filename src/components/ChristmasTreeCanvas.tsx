@@ -182,44 +182,53 @@ interface GiftModel {
   width: number;
   height: number;
   depth: number;
-  body: string;
-  ribbon: string;
+  front: string;
   side: string;
+  top: string;
+  ribbon: string;
+  ribbonShade: string;
   yaw: number;
-  tiltX: number;
-  tiltZ: number;
   phase: number;
 }
 
+// Curated luxury grounded Christmas presents nestled naturally around the wooden trunk base
 function createGiftModels(): GiftModel[] {
-  const range = (min: number, max: number) => min + Math.random() * (max - min);
-  const colors = [
-    { body: '#a51f36', side: '#6f1728', ribbon: '#f4d36d' },
-    { body: '#187845', side: '#0d4c30', ribbon: '#f7e4a0' },
-    { body: '#c6383d', side: '#84232c', ribbon: '#f6d573' },
+  const palettes = [
+    { front: '#9b1c31', side: '#66101f', top: '#be2640', ribbon: '#fde48b', ribbonShade: '#c9972b' }, // Velvet Crimson + Gold
+    { front: '#145c38', side: '#0a3a22', top: '#1d7a4c', ribbon: '#fef0a8', ribbonShade: '#c59630' }, // Royal Emerald + Champagne
+    { front: '#c8973a', side: '#8d661d', top: '#e4b960', ribbon: '#a8182b', ribbonShade: '#6f0d1b' }, // Champagne Silk + Ruby
+    { front: '#e4dac7', side: '#b8ac94', top: '#f5efe2', ribbon: '#b92034', ribbonShade: '#7d1322' }, // Ivory Pearl + Crimson
+    { front: '#6c1836', side: '#440c21', top: '#8c2248', ribbon: '#fae084', ribbonShade: '#be8e27' }, // Deep Burgundy + Gold
   ];
-  const goldenAngle = Math.PI * (3 - Math.sqrt(5));
-  const startingAngle = range(0, TAU);
-  const count = 9;
 
-  return Array.from({ length: count }, (_, index) => {
-    const color = colors[Math.floor(range(0, colors.length))];
-    const angle = startingAngle + index * goldenAngle + range(-0.42, 0.42);
-    const radius = 1.8 + Math.sqrt((index + Math.random()) / count) * 6.3;
+  // Hand-arranged cozy circle hugging the tree skirt at exact floor plane y = -10.35 (never floating!)
+  const layout: Array<{ angle: number; radius: number; w: number; h: number; d: number; yaw: number; p: number }> = [
+    { angle: 0.35,  radius: 2.35, w: 1.42, h: 1.12, d: 1.28, yaw: 0.42, p: 0 }, // Large Crimson front-right
+    { angle: 1.25,  radius: 3.10, w: 1.18, h: 0.88, d: 1.15, yaw: 1.05, p: 2 }, // Champagne Gold right
+    { angle: 2.15,  radius: 2.55, w: 1.32, h: 1.26, d: 1.20, yaw: 0.25, p: 1 }, // Tall Royal Emerald back-right
+    { angle: 2.95,  radius: 3.65, w: 1.08, h: 0.78, d: 1.05, yaw: 0.75, p: 3 }, // Ivory Pearl back
+    { angle: 3.72,  radius: 2.45, w: 1.48, h: 1.02, d: 1.32, yaw: 0.58, p: 4 }, // Wide Burgundy back-left
+    { angle: 4.55,  radius: 3.35, w: 1.12, h: 1.28, d: 1.08, yaw: 1.18, p: 0 }, // Tall Crimson left
+    { angle: 5.28,  radius: 2.25, w: 1.26, h: 0.92, d: 1.22, yaw: 0.30, p: 3 }, // Ivory Pearl front-left
+    { angle: 5.95,  radius: 3.95, w: 0.98, h: 0.76, d: 0.96, yaw: 0.88, p: 1 }, // Cozy Emerald front accent
+  ];
+
+  return layout.map((item, idx) => {
+    const pal = palettes[item.p % palettes.length];
     return {
-      x: Math.cos(angle) * radius,
-      z: Math.sin(angle) * radius,
-      baseY: -9.45 + range(-0.42, 0.28),
-      width: range(0.72, 1.6),
-      height: range(0.62, 1.55),
-      depth: range(0.68, 1.55),
-      body: color.body,
-      side: color.side,
-      ribbon: color.ribbon,
-      yaw: range(0, TAU),
-      tiltX: range(-0.16, 0.16),
-      tiltZ: range(-0.13, 0.13),
-      phase: range(0, TAU),
+      x: Math.cos(item.angle) * item.radius,
+      z: Math.sin(item.angle) * item.radius,
+      baseY: -10.35,
+      width: item.w,
+      height: item.h,
+      depth: item.d,
+      front: pal.front,
+      side: pal.side,
+      top: pal.top,
+      ribbon: pal.ribbon,
+      ribbonShade: pal.ribbonShade,
+      yaw: item.yaw,
+      phase: idx * 1.17,
     };
   });
 }
@@ -293,199 +302,207 @@ function assignPortraitTargets(
 function drawGiftModels(
   ctx: CanvasRenderingContext2D,
   projectFrame: Projector,
-  sprites: HTMLCanvasElement[],
+  goldSprite: HTMLCanvasElement | null,
+  diamondSprite: HTMLCanvasElement | null,
   time: number,
   intro: number,
-  scatter: number,
-  width: number,
-  height: number
+  scatter: number
 ) {
-  if (intro <= 0) return;
+  if (intro <= 0.05 || scatter >= 0.14) return;
 
-  const scatterProgress = Math.max(0, Math.min(1, scatter));
-  const gifts = GIFT_MODELS.map((gift, index) => {
-    const bob = Math.sin(time * 0.85 + gift.phase) * 0.045;
-    const centerY = gift.baseY + gift.height / 2 + bob;
+  const alphaMaster = Math.min(1, (intro - 0.05) * 1.4) * Math.max(0, 1 - scatter / 0.14);
+  if (alphaMaster <= 0.01) return;
+
+  const fillQuad = (pts: Array<{ x: number; y: number }>, fillStyle: string, strokeStyle?: string) => {
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    ctx.lineTo(pts[1].x, pts[1].y);
+    ctx.lineTo(pts[2].x, pts[2].y);
+    ctx.lineTo(pts[3].x, pts[3].y);
+    ctx.closePath();
+    ctx.fillStyle = fillStyle;
+    ctx.fill();
+    if (strokeStyle) {
+      ctx.strokeStyle = strokeStyle;
+      ctx.lineWidth = 0.7;
+      ctx.stroke();
+    }
+  };
+
+  // True 3D projection for each grounded gift, sorted strictly back-to-front by camera depth
+  const prepared = GIFT_MODELS.map((gift) => {
+    const centerY = gift.baseY + gift.height / 2;
     const origin = projectFrame(gift.x, centerY, gift.z);
-    const angle = -Math.PI / 2 + ((index + 0.5) * TAU) / GIFT_MODELS.length + time * 0.065;
-    const targetX = width / 2 + Math.cos(angle) * width * 0.28;
-    const targetY = height / 2 + Math.sin(angle) * height * 0.2;
-    const displayX = origin.x + (targetX - origin.x) * scatterProgress;
-    const displayY = origin.y + (targetY - origin.y) * scatterProgress;
-    const yaw = gift.yaw + Math.sin(time * 0.32 + gift.phase) * 0.035;
-    const tiltX = gift.tiltX + Math.sin(time * 0.72 + gift.phase) * 0.025;
-    const tiltZ = gift.tiltZ + Math.cos(time * 0.68 + gift.phase) * 0.025;
-    const modelScale = 0.48 * (1 - scatterProgress * 0.45);
-    const screenScale = origin.scale * modelScale;
-    const projectVertex = (vx: number, vy: number, vz: number) => {
-      const cosX = Math.cos(tiltX);
-      const sinX = Math.sin(tiltX);
-      const rotatedY = vy * cosX - vz * sinX;
-      const rotatedZ = vy * sinX + vz * cosX;
-      const cosZ = Math.cos(tiltZ);
-      const sinZ = Math.sin(tiltZ);
-      const rotatedX = vx * cosZ - rotatedY * sinZ;
-      const tiltedY = vx * sinZ + rotatedY * cosZ;
-      const cosYaw = Math.cos(yaw);
-      const sinYaw = Math.sin(yaw);
-      const worldX = gift.x + rotatedX * cosYaw + rotatedZ * sinYaw;
-      const worldZ = gift.z - rotatedX * sinYaw + rotatedZ * cosYaw;
-      const projected = projectFrame(worldX, centerY + tiltedY, worldZ);
+    const cosY = Math.cos(gift.yaw);
+    const sinY = Math.sin(gift.yaw);
 
-      return {
-        x: displayX + (projected.x - origin.x) * modelScale,
-        y: displayY + (projected.y - origin.y) * modelScale,
-        z: projected.z,
-      };
+    const projectLocal = (lx: number, ly: number, lz: number) => {
+      const wx = gift.x + lx * cosY + lz * sinY;
+      const wz = gift.z - lx * sinY + lz * cosY;
+      return projectFrame(wx, gift.baseY + ly, wz);
     };
 
-    const halfWidth = gift.width / 2;
-    const halfHeight = gift.height / 2;
-    const halfDepth = gift.depth / 2;
-    const faces = [
-      {
-        color: gift.body,
-        vertices: [
-          [-halfWidth, -halfHeight, halfDepth],
-          [halfWidth, -halfHeight, halfDepth],
-          [halfWidth, halfHeight, halfDepth],
-          [-halfWidth, halfHeight, halfDepth],
-        ],
-      },
-      {
-        color: gift.side,
-        vertices: [
-          [halfWidth, -halfHeight, -halfDepth],
-          [-halfWidth, -halfHeight, -halfDepth],
-          [-halfWidth, halfHeight, -halfDepth],
-          [halfWidth, halfHeight, -halfDepth],
-        ],
-      },
-      {
-        color: gift.side,
-        vertices: [
-          [-halfWidth, -halfHeight, -halfDepth],
-          [-halfWidth, -halfHeight, halfDepth],
-          [-halfWidth, halfHeight, halfDepth],
-          [-halfWidth, halfHeight, -halfDepth],
-        ],
-      },
-      {
-        color: gift.side,
-        vertices: [
-          [halfWidth, -halfHeight, halfDepth],
-          [halfWidth, -halfHeight, -halfDepth],
-          [halfWidth, halfHeight, -halfDepth],
-          [halfWidth, halfHeight, halfDepth],
-        ],
-      },
-      {
-        color: '#e6b958',
-        vertices: [
-          [-halfWidth, halfHeight, halfDepth],
-          [halfWidth, halfHeight, halfDepth],
-          [halfWidth, halfHeight, -halfDepth],
-          [-halfWidth, halfHeight, -halfDepth],
-        ],
-      },
-      {
-        color: '#3e2630',
-        vertices: [
-          [-halfWidth, -halfHeight, -halfDepth],
-          [halfWidth, -halfHeight, -halfDepth],
-          [halfWidth, -halfHeight, halfDepth],
-          [-halfWidth, -halfHeight, halfDepth],
-        ],
-      },
-    ].map((face) => {
-      const points = face.vertices.map(([x, y, z]) => projectVertex(x, y, z));
-      return {
-        color: face.color,
-        points,
-        depth: points.reduce((sum, point) => sum + point.z, 0) / points.length,
-      };
-    }).sort((a, b) => a.depth - b.depth);
-
-    return {
-      gift,
-      projectVertex,
-      faces,
-      depth: origin.z,
-      screenScale,
-      halfWidth,
-      halfHeight,
-      halfDepth,
-    };
-  }).sort((a, b) => a.depth - b.depth);
+    return { gift, origin, projectLocal };
+  }).sort((a, b) => a.origin.z - b.origin.z);
 
   ctx.save();
   ctx.globalCompositeOperation = 'source-over';
-  ctx.globalAlpha = intro * (1 - scatterProgress);
-  gifts.forEach(({ gift, projectVertex, faces, screenScale, halfWidth, halfHeight, halfDepth }) => {
-    const base = projectVertex(0, -halfHeight, 0);
-    ctx.save();
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.24)';
+  ctx.globalAlpha = alphaMaster;
+
+  prepared.forEach(({ gift, origin, projectLocal }) => {
+    const hw = gift.width * 0.5;
+    const hd = gift.depth * 0.5;
+    const h = gift.height;
+    const lidY = h * 0.78;
+    const rw = Math.min(gift.width, gift.depth) * 0.11;
+
+    // 1. Grounded contact shadow directly beneath the box's floor footprint
+    const floorCenter = projectLocal(0, 0, 0);
+    const shadowRx = origin.scale * Math.max(gift.width, gift.depth) * 0.66;
+    const shadowRy = shadowRx * 0.34;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.44)';
     ctx.beginPath();
-    ctx.ellipse(base.x, base.y + screenScale * 0.08, screenScale * gift.width * 0.34, screenScale * gift.depth * 0.22, 0, 0, TAU);
+    ctx.ellipse(floorCenter.x, floorCenter.y + shadowRy * 0.15, shadowRx, shadowRy, 0, 0, TAU);
     ctx.fill();
 
-    faces.forEach(({ color, points }) => {
+    // 2. Define the 4 vertical walls (each with its own matching centered vertical satin ribbon band)
+    type SideWall = {
+      id: string;
+      color: string;
+      ribbonColor: string;
+      quad: Array<{ x: number; y: number; z: number }>;
+      lidSeam: [ { x: number; y: number; z: number }, { x: number; y: number; z: number } ];
+      ribbonQuad: Array<{ x: number; y: number; z: number }>;
+      avgZ: number;
+    };
+
+    const makeWall = (
+      id: string,
+      color: string,
+      ribbonColor: string,
+      c0: [number, number, number],
+      c1: [number, number, number],
+      r0: [number, number, number],
+      r1: [number, number, number]
+    ): SideWall => {
+      const p0 = projectLocal(c0[0], 0, c0[2]);
+      const p1 = projectLocal(c1[0], 0, c1[2]);
+      const p2 = projectLocal(c1[0], h, c1[2]);
+      const p3 = projectLocal(c0[0], h, c0[2]);
+      const s0 = projectLocal(c0[0], lidY, c0[2]);
+      const s1 = projectLocal(c1[0], lidY, c1[2]);
+      const rb0 = projectLocal(r0[0], 0, r0[2]);
+      const rb1 = projectLocal(r1[0], 0, r1[2]);
+      const rb2 = projectLocal(r1[0], h, r1[2]);
+      const rb3 = projectLocal(r0[0], h, r0[2]);
+      return {
+        id,
+        color,
+        ribbonColor,
+        quad: [p0, p1, p2, p3],
+        lidSeam: [s0, s1],
+        ribbonQuad: [rb0, rb1, rb2, rb3],
+        avgZ: (p0.z + p1.z + p2.z + p3.z) * 0.25,
+      };
+    };
+
+    const walls: SideWall[] = [
+      makeWall('front', gift.front, gift.ribbon,      [-hw, 0,  hd], [ hw, 0,  hd], [-rw, 0,  hd + 0.008], [ rw, 0,  hd + 0.008]),
+      makeWall('back',  gift.side,  gift.ribbonShade, [ hw, 0, -hd], [-hw, 0, -hd], [ rw, 0, -hd - 0.008], [-rw, 0, -hd - 0.008]),
+      makeWall('right', gift.side,  gift.ribbonShade, [ hw, 0,  hd], [ hw, 0, -hd], [ hw + 0.008, 0,  rw], [ hw + 0.008, 0, -rw]),
+      makeWall('left',  gift.front, gift.ribbon,      [-hw, 0, -hd], [-hw, 0,  hd], [-hw - 0.008, 0, -rw], [-hw - 0.008, 0,  rw]),
+    ];
+
+    // Painter's order: draw only the 2 nearest visible vertical faces (clean 3D with zero back-face clutter!)
+    walls.sort((a, b) => a.avgZ - b.avgZ);
+    const visibleWalls = walls.slice(2);
+
+    visibleWalls.forEach((wall) => {
+      fillQuad(wall.quad, wall.color, 'rgba(255, 224, 150, 0.16)');
+      // Boutique gift-box lid shadow seam
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.34)';
+      ctx.lineWidth = Math.max(1, origin.scale * 0.045);
       ctx.beginPath();
-      points.forEach((point, index) => {
-        if (index === 0) ctx.moveTo(point.x, point.y);
-        else ctx.lineTo(point.x, point.y);
-      });
-      ctx.closePath();
-      ctx.fillStyle = color;
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(255, 226, 155, 0.48)';
-      ctx.lineWidth = Math.max(0.6, screenScale * 0.025);
+      ctx.moveTo(wall.lidSeam[0].x, wall.lidSeam[0].y);
+      ctx.lineTo(wall.lidSeam[1].x, wall.lidSeam[1].y);
       ctx.stroke();
+      // Continuous vertical satin ribbon wrapping down this visible face
+      fillQuad(wall.ribbonQuad, wall.ribbonColor);
     });
 
-    const ribbonHalfWidth = gift.width * 0.075;
-    const frontRibbon = [
-      [-ribbonHalfWidth, -halfHeight, halfDepth + 0.004],
-      [ribbonHalfWidth, -halfHeight, halfDepth + 0.004],
-      [ribbonHalfWidth, halfHeight, halfDepth + 0.004],
-      [-ribbonHalfWidth, halfHeight, halfDepth + 0.004],
-    ].map(([x, y, z]) => projectVertex(x, y, z));
-    ctx.beginPath();
-    frontRibbon.forEach((point, index) => {
-      if (index === 0) ctx.moveTo(point.x, point.y);
-      else ctx.lineTo(point.x, point.y);
-    });
-    ctx.closePath();
+    // 3. Top Lid Face (slightly wider boutique overhang + warm tree-light sheen)
+    const lidPad = 0.03;
+    const topPts = [
+      projectLocal(-hw - lidPad, h,  hd + lidPad),
+      projectLocal( hw + lidPad, h,  hd + lidPad),
+      projectLocal( hw + lidPad, h, -hd - lidPad),
+      projectLocal(-hw - lidPad, h, -hd - lidPad),
+    ];
+    fillQuad(topPts, gift.top, 'rgba(255, 232, 175, 0.28)');
+
+    // 4. Crossed Satin Ribbon (+) cleanly across the top lid
+    const topRibbonX = [
+      projectLocal(-hw - lidPad, h + 0.006,  rw),
+      projectLocal( hw + lidPad, h + 0.006,  rw),
+      projectLocal( hw + lidPad, h + 0.006, -rw),
+      projectLocal(-hw - lidPad, h + 0.006, -rw),
+    ];
+    const topRibbonZ = [
+      projectLocal(-rw, h + 0.008,  hd + lidPad),
+      projectLocal( rw, h + 0.008,  hd + lidPad),
+      projectLocal( rw, h + 0.008, -hd - lidPad),
+      projectLocal(-rw, h + 0.008, -hd - lidPad),
+    ];
+    fillQuad(topRibbonX, gift.ribbon);
+    fillQuad(topRibbonZ, gift.ribbon);
+
+    // 5. Sculpted 3D Double-Loop Satin Ribbon Bow crowning the top of each gift!
+    const bowCenter = projectLocal(0, h + 0.04, 0);
+    const bowR = Math.max(4, origin.scale * Math.min(gift.width, gift.depth) * 0.24);
+    const drawBowLoop = (dirX: number, dirZ: number, shade: string) => {
+      const tip = projectLocal(dirX * 0.42, h + 0.28, dirZ * 0.42);
+      const ctrl1 = projectLocal(dirX * 0.28 - dirZ * 0.22, h + 0.36, dirZ * 0.28 + dirX * 0.22);
+      const ctrl2 = projectLocal(dirX * 0.28 + dirZ * 0.22, h + 0.06, dirZ * 0.28 - dirX * 0.22);
+      ctx.beginPath();
+      ctx.moveTo(bowCenter.x, bowCenter.y);
+      ctx.quadraticCurveTo(ctrl1.x, ctrl1.y, tip.x, tip.y);
+      ctx.quadraticCurveTo(ctrl2.x, ctrl2.y, bowCenter.x, bowCenter.y);
+      ctx.closePath();
+      ctx.fillStyle = shade;
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255, 250, 225, 0.45)';
+      ctx.lineWidth = 0.7;
+      ctx.stroke();
+    };
+    drawBowLoop(-1, 0, gift.ribbonShade);
+    drawBowLoop(1, 0, gift.ribbon);
+    drawBowLoop(0, -1, gift.ribbonShade);
+    drawBowLoop(0, 1, gift.ribbon);
+
+    // Central satin bow knot
     ctx.fillStyle = gift.ribbon;
+    ctx.beginPath();
+    ctx.arc(bowCenter.x, bowCenter.y, Math.max(2.2, bowR * 0.24), 0, TAU);
     ctx.fill();
 
-    const topRibbon = [
-      [-halfWidth, halfHeight + 0.004, -gift.depth * 0.07],
-      [halfWidth, halfHeight + 0.004, -gift.depth * 0.07],
-      [halfWidth, halfHeight + 0.004, gift.depth * 0.07],
-      [-halfWidth, halfHeight + 0.004, gift.depth * 0.07],
-    ].map(([x, y, z]) => projectVertex(x, y, z));
-    ctx.beginPath();
-    topRibbon.forEach((point, index) => {
-      if (index === 0) ctx.moveTo(point.x, point.y);
-      else ctx.lineTo(point.x, point.y);
-    });
-    ctx.closePath();
-    ctx.fillStyle = gift.ribbon;
-    ctx.fill();
-
-    const sparkle = sprites[0];
-    if (sparkle) {
-      const sparkleSize = Math.max(1.5, screenScale * 0.3);
-      const sparklePoint = projectVertex(-halfWidth * 0.42, halfHeight * 0.3, halfDepth + 0.01);
+    // 6. Magical Tree-Light Stardust Glint sparkling on the bow (integrates gifts with particle tree!)
+    const twinkle = 0.45 + 0.55 * Math.sin(time * 2.6 + gift.phase * 2.1);
+    const sparkPeak = Math.pow(Math.max(0, Math.sin(time * 1.9 + gift.phase * 3.3)), 8);
+    if (goldSprite) {
+      ctx.save();
       ctx.globalCompositeOperation = 'lighter';
-      ctx.globalAlpha = 0.7;
-      ctx.drawImage(sparkle, sparklePoint.x - sparkleSize / 2, sparklePoint.y - sparkleSize / 2, sparkleSize, sparkleSize);
-      ctx.globalAlpha = intro;
-      ctx.globalCompositeOperation = 'source-over';
+      const glowSz = Math.max(8, bowR * (1.35 + 0.5 * twinkle));
+      ctx.globalAlpha = alphaMaster * (0.32 + 0.32 * twinkle);
+      ctx.drawImage(goldSprite, bowCenter.x - glowSz / 2, bowCenter.y - glowSz / 2, glowSz, glowSz);
+      if (diamondSprite && sparkPeak > 0.2) {
+        const dSz = glowSz * (0.95 + 0.65 * sparkPeak);
+        ctx.globalAlpha = alphaMaster * 0.85 * sparkPeak;
+        ctx.drawImage(diamondSprite, bowCenter.x - dSz / 2, bowCenter.y - dSz / 2, dSz, dSz);
+      }
+      ctx.restore();
     }
-    ctx.restore();
   });
+
   ctx.restore();
 }
 
@@ -1849,8 +1866,16 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
       if (frameTheme.id === 'snowglobe' && scatter < 0.1) {
         drawTreeDecorations(ctx, projectFrame, time, intro, scatter);
       }
-      if (scatter < 0.1) {
-        drawGiftModels(ctx, projectFrame, sprites, time, intro, scatter, w, h);
+      if (scatter < 0.14) {
+        drawGiftModels(
+          ctx,
+          projectFrame,
+          goldSparkSpriteRef.current || sprites[0],
+          diamondStarSpriteRef.current,
+          time,
+          intro,
+          scatter
+        );
       }
 
       // 6. Orbiting Points (fairy dust)
