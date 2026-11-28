@@ -888,12 +888,12 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
         ? createProjector(yaw * (1 - portraitProgress), pitch * (1 - portraitProgress), w, h, effFocal)
         : projectFrame;
       const portraitAspect = portraitTargetsRef.current?.aspect ?? portraitAspectRef.current;
-      const targetMaxH = h * 0.80;
-      const targetMaxW = w * 0.82;
+      const targetMaxH = h * 0.85;
+      const targetMaxW = w * 0.88;
       const portraitHeight = Math.min(targetMaxH, targetMaxW / portraitAspect);
       const portraitWidth = portraitHeight * portraitAspect;
       const portraitLeft = (w - portraitWidth) / 2;
-      const portraitTop = Math.max(h * 0.035, (h * 0.86 - portraitHeight) / 2);
+      const portraitTop = Math.max(h * 0.02, (h * 0.87 - portraitHeight) / 2);
       if (frameSettings.treeState !== 'formed' || !frameSettings.showStar) {
         starSequenceRef.current = 0;
       } else if (scatter < 0.06 && intro >= 0.9) {
@@ -1121,30 +1121,37 @@ export const ChristmasTreeCanvas = React.memo(forwardRef<CanvasHandle, Props>(
           }
         }
 
-        // 2. Pure brilliant white stardust (#FFFFFF): fine 0.5-1.1px dots with modulated 0.35-0.85 alpha
+        // 2. Pure brilliant white stardust (#FFFFFF): crisp, clear, luminous starlight
         if (whiteGlow > 0.005) {
           const pSpeed = pt.portraitSpeed || 2.4;
-          const pTwinkle = 0.82 + 0.18 * Math.sin(time * pSpeed + pt.phase * 3.7);
+          const pTwinkle = 0.84 + 0.16 * Math.sin(time * pSpeed + pt.phase * 3.7);
           const lum = pt.portraitLight ?? 0.7;
-          const lumAlpha = 0.35 + 0.50 * lum;
+          const lumAlpha = 0.45 + 0.55 * Math.pow(lum, 1.1);
           const tempFadeMult = isTemp ? tempReturnFactor : 1.0;
           const finalAlpha =
-            Math.min(0.85, Math.max(0.35, lumAlpha * pTwinkle)) *
+            Math.min(1.0, Math.max(0.38, lumAlpha * pTwinkle)) *
             whiteGlow *
             priorityCullMult *
             tempFadeMult;
 
           if (finalAlpha > 0.008) {
+            // 1. Crisp solid white core: guarantees brilliant #FFFFFF starlight
             ctx.globalAlpha = finalAlpha;
-            // High-performance GPU sprite draw: renders crisp solid white core + aura in a single blit!
-            const auraSize = radius * 2.4;
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(cx, cy, Math.max(0.65, radius * 0.55), 0, TAU);
+            ctx.fill();
+
+            // 2. Radiant atmospheric starlight glow corona
+            const auraSize = Math.max(3.0, radius * 2.8);
+            ctx.globalAlpha = finalAlpha * 0.46;
             ctx.drawImage(starlightSprite, cx - auraSize / 2, cy - auraSize / 2, auraSize, auraSize);
 
             // Batch 4-pointed diamond star sparkle for single-pass stroke
-            if (pt.portraitIsSparkle && finalAlpha > 0.3) {
-              const pFlare = Math.pow(Math.max(0, Math.sin(time * 1.6 + pt.phase * 4.9)), 14) * 0.7;
-              if (pFlare > 0.42) {
-                flareBatch.push({ x: cx, y: cy, len: radius * (2.2 + 1.8 * pFlare) });
+            if (pt.portraitIsSparkle || (priority === 1 && pTwinkle > 0.95)) {
+              const pFlare = Math.pow(Math.max(0, Math.sin(time * 1.6 + pt.phase * 4.9)), 14) * 0.75;
+              if (pFlare > 0.38) {
+                flareBatch.push({ x: cx, y: cy, len: radius * (2.2 + 2.0 * pFlare) });
               }
             }
           }

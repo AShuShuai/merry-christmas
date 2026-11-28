@@ -375,14 +375,15 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
     const fWidth = fRight - fLeft;
     const fHeight = fBottom - fTop;
 
-    const padX = fWidth * 0.68;
-    const padTop = fHeight * 0.35;
-    const padBottom = fHeight * 0.92;
+    // Tighter framing: face itself occupies 65%+ of the bounding box (significantly enlarging Chiara's face!)
+    const padX = fWidth * 0.40;
+    const padTop = fHeight * 0.22;
+    const padBottom = fHeight * 0.44;
 
-    const bLeft = Math.max(0.06, fLeft - padX);
-    const bRight = Math.min(0.94, fRight + padX);
-    const bTop = Math.max(0.06, fTop - padTop);
-    const bBottom = Math.min(0.92, fBottom + padBottom);
+    const bLeft = Math.max(0.04, fLeft - padX);
+    const bRight = Math.min(0.96, fRight + padX);
+    const bTop = Math.max(0.04, fTop - padTop);
+    const bBottom = Math.min(0.94, fBottom + padBottom);
 
     bounds = {
       left: bLeft,
@@ -537,9 +538,9 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
   // 2. High-Density Skin Chiaroscuro & Feathered Hair / Shoulders
   const faceCenter = {
     x: bounds.left + bounds.width * 0.48,
-    y: bounds.top + bounds.height * 0.38,
+    y: bounds.top + bounds.height * 0.44,
   };
-  const faceRadius = Math.max(bounds.width, bounds.height) * 0.44;
+  const faceRadius = Math.max(bounds.width, bounds.height) * 0.46;
 
   const densityField = new Float32Array(imageWidth * imageHeight);
   let totalDensity = 0;
@@ -567,9 +568,9 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
 
       // SHOULDER SOFT FADE-OUT: smoothly fade out bottom edge well above Merry Christmas text
       let fade = 1.0;
-      if (normY > 0.60) {
-        // Drops smoothly to 0 by normY = 0.78
-        fade *= Math.max(0, 1.0 - Math.pow(Math.min(1, (normY - 0.60) / 0.18), 1.25));
+      if (normY > 0.68) {
+        // Drops smoothly to 0 by normY = 0.88
+        fade *= Math.max(0, 1.0 - Math.pow(Math.min(1, (normY - 0.68) / 0.20), 1.25));
       }
       if (distFromFace > faceRadius * 0.90) {
         const lateralFalloff = (distFromFace - faceRadius * 0.90) / (faceRadius * 0.50);
@@ -666,10 +667,10 @@ export async function processPortraitImage(image: HTMLImageElement): Promise<Por
           const jitterX = (Math.random() - 0.5) * 0.002;
           const jitterY = (Math.random() - 0.5) * 0.002;
 
-          // FINER PARTICLE RADII (0.5px to 1.1px radius, i.e. 1.0px to 2.2px diameter)
-          let baseSize = 0.55 + 0.45 * Math.pow(lightVal, 1.2) + (Math.random() - 0.5) * 0.15;
-          if (skinPixel) baseSize += 0.1;
-          const clampedSize = Math.max(0.5, Math.min(1.1, baseSize));
+          // VIBRANT STARDUST RADII (0.7px to 1.7px radius, crisp and clearly visible)
+          let baseSize = 0.70 + 0.85 * Math.pow(lightVal, 1.2) + (Math.random() - 0.5) * 0.15;
+          if (skinPixel) baseSize += 0.2;
+          const clampedSize = Math.max(0.65, Math.min(1.7, baseSize));
 
           let priority = 2;
           let category: 'feature' | 'skin' | 'hair' | 'scatter' = 'skin';

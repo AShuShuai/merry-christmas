@@ -91,9 +91,10 @@ export const FloatingPhotosOverlay: React.FC<Props> = ({
 
   const cursorScreenX = gestureState.cursorX * width;
   const cursorScreenY = gestureState.cursorY * height;
-  // Photos orbit gracefully around the formed Christmas tree, fading out when morphed into the portrait
-  const photoVisibility = Math.max(0, 1 - scatter * 1.5) * Math.min(1, introProgress * 1.25);
-  const photosReady = introProgress >= 0.75 && scatter < 0.35;
+  // Photos appear ONLY when the face is shown (scatter -> 1), and NOT when the tree is formed (scatter -> 0)
+  const revealProgress = Math.max(0, Math.min(1, (scatter - 0.25) / 0.55));
+  const photoVisibility = revealProgress * revealProgress * (3 - 2 * revealProgress);
+  const photosReady = introProgress >= 0.85 && scatter >= 0.65;
   const photoIds = photos.map((photo) => photo.id).join('|');
   if (photoIdsRef.current !== photoIds) {
     const positions = new Map<string, OrbitPosition>();
@@ -111,7 +112,7 @@ export const FloatingPhotosOverlay: React.FC<Props> = ({
   }
 
   const cardBaseWidth = width < 640 ? 88 : 104;
-  const orbitRadius = Math.min(width * 0.36, height * 0.34);
+  const orbitRadius = Math.min(width * 0.40, height * 0.38);
   const rawProjectedCards = photos.map((photo) => {
     const position = photoOrbitPositionsRef.current.get(photo.id)!;
     const angle = orbitTime * orbitSpeed - smoothedYaw;
