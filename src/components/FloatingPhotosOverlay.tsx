@@ -15,11 +15,12 @@ function getPhotoOrigin(
   x: number,
   y: number,
   z: number,
-  scale: number
+  scale: number,
+  tilt: number = 0
 ): PhotoTransitionOrigin | undefined {
   if (!element) return undefined;
   const { left, top, width, height } = element.getBoundingClientRect();
-  return { left, top, width, height, x, y, z, scale };
+  return { left, top, width, height, x, y, z, scale, tilt };
 }
 
 interface Props {
@@ -81,9 +82,9 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
   const cursorScreenX = gestureState.cursorX * width;
   const cursorScreenY = gestureState.cursorY * height;
   // Photos appear ONLY when the face is shown (scatter -> 1), and NOT when the tree is formed (scatter -> 0)
-  const revealProgress = Math.max(0, Math.min(1, (scatter - 0.25) / 0.55));
+  const revealProgress = Math.max(0, Math.min(1, (scatter - 0.35) / 0.55));
   const photoVisibility = revealProgress * revealProgress * (3 - 2 * revealProgress);
-  const photosReady = introProgress >= 0.85 && scatter >= 0.65;
+  const photosReady = introProgress >= 0.85 && scatter >= 0.72;
   const photoIds = photos.map((photo) => photo.id).join('|');
   if (photoIdsRef.current !== photoIds) {
     const positions = new Map<string, OrbitPosition>();
@@ -100,7 +101,7 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
     photoIdsRef.current = photoIds;
   }
 
-  const cardBaseWidth = width < 640 ? 92 : 112;
+  const cardBaseWidth = width < 640 ? 104 : 128;
   const leftPhotos = photos.filter((_, idx) => idx % 2 === 0);
   const rightPhotos = photos.filter((_, idx) => idx % 2 === 1);
 
@@ -111,27 +112,31 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
     const sideIdx = sideList.indexOf(photo);
     const sideCount = Math.max(1, sideList.length);
 
-    // Stable, evenly distributed vertical slots on left & right flanks (NEVER teleports, NEVER overlaps face!)
-    // Positioned closer to center (24% and 76% width) so webcam hand cursor reaches them effortlessly!
+    // Stable, evenly distributed vertical slots on left & right flanks (easy webcam reach, clear of Chiara's face!)
     const tY = sideCount === 1 ? 0.5 : sideIdx / (sideCount - 1);
-    const arcCurve = Math.sin(tY * Math.PI); // subtle gentle outward curve in the middle
-    const swayX = Math.sin(orbitTime * 0.65 + position.phase) * Math.min(18, width * 0.016);
-    const swayY = Math.cos(orbitTime * 0.75 + position.phase * 1.3) * 11;
+    const arcCurve = Math.sin(tY * Math.PI);
+    const swayX = Math.sin(orbitTime * 0.58 + position.phase) * Math.min(15, width * 0.014);
+    const swayY = Math.cos(orbitTime * 0.68 + position.phase * 1.3) * 10;
 
     const baseFlankX = isLeftSide
-      ? width * (0.255 - arcCurve * 0.03)
-      : width * (0.745 + arcCurve * 0.03);
+      ? width * (0.245 - arcCurve * 0.032)
+      : width * (0.755 + arcCurve * 0.032);
     const screenX = baseFlankX + swayX;
-    const minY = height * 0.25;
-    const maxY = height * 0.68;
+    const minY = height * 0.24;
+    const maxY = height * 0.69;
     const screenY = minY + tY * (maxY - minY) + swayY;
 
-    const orbitX = isLeftSide ? -0.8 : 0.8;
+    // Natural suspended 3D Polaroid tilt (organic angle + subtle gentle sway)
+    const staticAngle = (isLeftSide ? -1 : 1) * (sideIdx % 2 === 0 ? 5.5 : 3.4) * (sideIdx === 1 ? -0.75 : 1);
+    const tilt = staticAngle + Math.sin(orbitTime * 0.52 + position.phase) * 1.4;
+    const yaw3d = isLeftSide ? 11 : -11;
+
     const orbitY = (tY - 0.5) * 1.2;
     const proj = { x: screenX, y: screenY, z: 2.5 - Math.abs(orbitY), scale: 1 };
 
-    return { photo, proj, screenX, screenY, orbitX, orbitY };
+    return { photo, proj, screenX, screenY, tilt, yaw3d };
   });
+
   const nearestSpacing = new Map<string, number>();
   rawProjectedCards.forEach((card, index) => {
     let nearest = Number.POSITIVE_INFINITY;
@@ -144,22 +149,24 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
     });
     nearestSpacing.set(card.photo.id, nearest);
   });
+
   const projectedCards = rawProjectedCards.map((card) => {
     const spacing = nearestSpacing.get(card.photo.id) ?? Number.POSITIVE_INFINITY;
     const scale = Math.min(
-      0.84,
-      Number.isFinite(spacing) ? (spacing * 0.66) / cardBaseWidth : 0.84
+      0.88,
+      Number.isFinite(spacing) ? (spacing * 0.68) / cardBaseWidth : 0.88
     );
     const cardWidth = cardBaseWidth * scale;
     const isFront = true;
     const cursorDist = Math.hypot(card.screenX - cursorScreenX, card.screenY - cursorScreenY);
-    // Generous magnetic hitbox so grabbing photos with webcam pinch is effortless
+    // Generous magnetic hitbox so grabbing Polaroids with webcam pinch is effortless
     const isUnderCursor =
       Math.abs(card.screenX - cursorScreenX) <= cardWidth * 1.15 &&
-      Math.abs(card.screenY - cursorScreenY) <= cardWidth * 1.05 + 24;
+      Math.abs(card.screenY - cursorScreenY) <= cardWidth * 1.1 + 26;
 
     return { ...card, scale, isFront, isUnderCursor, cursorDist };
   }).sort((a, b) => a.proj.z - b.proj.z);
+
   const photoUnderCursorCard =
     projectedCards
       .filter((card) => card.isUnderCursor)
@@ -174,7 +181,8 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
       selectedCard?.screenX ?? width / 2,
       selectedCard?.screenY ?? height / 2,
       selectedCard?.proj.z ?? 0,
-      selectedCard?.scale ?? 1
+      selectedCard?.scale ?? 1,
+      selectedCard?.tilt ?? 0
     );
     if (origin) onPhotoOriginUpdate(selectedPhotoId, origin);
   }, [
@@ -187,12 +195,14 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
     selectedCard?.screenY,
     selectedCard?.proj.z,
     selectedCard?.scale,
+    selectedCard?.tilt,
     onPhotoOriginUpdate,
   ]);
 
-  // A pinch selects the visible photo under the cursor.
+  // A pinch selects the visible Polaroid under the cursor or flies the open one back.
   useEffect(() => {
-    const isPinching = gestureState.hasHand &&
+    const isPinching =
+      gestureState.hasHand &&
       gestureState.gesture === 'pinch' &&
       gestureState.isPinching;
 
@@ -224,7 +234,7 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
           Math.max(0.035, pinchOpenDistanceRef.current * 0.07));
 
     const nowMs = performance.now();
-    const cooldownElapsed = nowMs - lastPinchTriggerAtRef.current >= 520;
+    const cooldownElapsed = nowMs - lastPinchTriggerAtRef.current >= 540;
 
     if (closedWithMotion && cooldownElapsed) {
       pinchOpenDistanceRef.current = null;
@@ -245,7 +255,8 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
           photoUnderCursorCard?.screenX ?? width / 2,
           photoUnderCursorCard?.screenY ?? height / 2,
           photoUnderCursorCard?.proj.z ?? 0,
-          photoUnderCursorCard?.scale ?? 1
+          photoUnderCursorCard?.scale ?? 1,
+          photoUnderCursorCard?.tilt ?? 0
         )
       );
     }
@@ -261,6 +272,7 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
     gestureState.cursorX,
     gestureState.cursorY,
     photoUnderCursor?.id,
+    photoUnderCursorCard,
     onSelectPhoto,
     photos,
     isPhotoOpen,
@@ -269,9 +281,14 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
 
   if (width === 0 || height === 0) return null;
 
+  const isHoveringAnyPhoto = Boolean(photosReady && !isPhotoOpen && photoUnderCursor);
+
   return (
-    <div className="absolute inset-0 pointer-events-none overflow-hidden select-none">
-      {/* Gesture cursor follows the index fingertip and mirrors the detected hand pose. */}
+    <div
+      className="absolute inset-0 pointer-events-none overflow-hidden select-none"
+      style={{ perspective: '1100px' }}
+    >
+      {/* Gesture cursor follows the index fingertip and glows warm gold when locked onto a Polaroid */}
       {gestureState.hasHand && (
         <div
           className="absolute pointer-events-none transform -translate-x-1/2 -translate-y-1/2 z-40 transition-transform duration-150"
@@ -281,10 +298,12 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
           }}
         >
           <div
-            className={`w-10 h-10 rounded-full flex items-center justify-center border bg-slate-950/60 backdrop-blur-sm transition-all duration-150 ${
+            className={`w-11 h-11 rounded-full flex items-center justify-center border bg-slate-950/65 backdrop-blur-md transition-all duration-200 ${
               gestureState.isPinching
-                ? 'border-cyan-200 scale-110'
-                : 'border-white/60'
+                ? 'border-amber-200 scale-110 shadow-[0_0_22px_rgba(251,191,36,0.85)]'
+                : isHoveringAnyPhoto
+                  ? 'border-amber-300/90 scale-105 shadow-[0_0_18px_rgba(251,191,36,0.65)]'
+                  : 'border-white/55'
             }`}
           >
             <span
@@ -296,7 +315,7 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
                     ? 'Pugno chiuso'
                     : 'Mano aperta'
               }
-              className="text-[25px] leading-none transition-transform duration-150"
+              className="text-[24px] leading-none transition-transform duration-150"
             >
               {gestureState.isPinching
                 ? '🤏'
@@ -308,77 +327,98 @@ export const FloatingPhotosOverlay: React.FC<Props> = React.memo(({
         </div>
       )}
 
-      {/* 3D Floating Memory Polaroid Cards */}
+      {/* 3D Floating Smoked-Glass & Gold Polaroid Memory Cards */}
       {(photoVisibility > 0.001 || isPhotoOpen || isPhotoClosing) &&
-        projectedCards.map(({ photo, proj, screenX, screenY, scale: baseScale, isFront, isUnderCursor }) => {
-        // If card is too far behind, hide or make deeply faded
-        const depthOpacity = photosReady
-          ? 1
-          : isFront
-            ? Math.min(1, Math.max(0.65, (proj.z + 8) / 14))
-            : Math.max(0.18, (proj.z + 10) / 25);
-        const isSelectedPhotoOpen = isPhotoOpen && photo.id === selectedPhotoId;
-        // Keep the slot invisible while the photo is open OR flying back into place so there's never a duplicate ghost!
-        const opacity = introProgress < 1
-          ? 0
-          : isSelectedPhotoOpen
-            ? 0
-            : depthOpacity * photoVisibility;
+        projectedCards.map(({ photo, proj, screenX, screenY, scale: baseScale, tilt, yaw3d, isFront, isUnderCursor }) => {
+          const isSelectedPhotoOpen = isPhotoOpen && photo.id === selectedPhotoId;
+          // Keep slot invisible while the Polaroid is open OR flying back so there's never a duplicate ghost!
+          const opacity =
+            introProgress < 1
+              ? 0
+              : isSelectedPhotoOpen
+                ? 0
+                : photoVisibility;
 
-        const isHoveredByHand = gestureState.hasHand && isUnderCursor && isFront;
-        const scale = isHoveredByHand ? baseScale * 1.18 : baseScale;
+          const isHoveredByHand = gestureState.hasHand && isUnderCursor && isFront && photosReady && !isPhotoOpen;
+          const activeScale = isHoveredByHand ? baseScale * 1.22 : baseScale;
+          // Gently straightens upright toward the viewer when hovered by your hand!
+          const activeTilt = isHoveredByHand ? 0 : tilt;
+          const activeYaw = isHoveredByHand ? 0 : yaw3d;
 
-        return (
-          <div
-            key={photo.id}
-            onClick={(event) => {
-              chimeAudio.playChime(1046.5, 0.15);
-              onSelectPhoto(
-                photo,
-                getPhotoOrigin(event.currentTarget, screenX, screenY, proj.z, scale)
-              );
-            }}
-            ref={(element) => {
-              if (element) photoCardElementsRef.current.set(photo.id, element);
-              else photoCardElementsRef.current.delete(photo.id);
-            }}
-            className={`absolute transform -translate-x-1/2 -translate-y-1/2 cursor-pointer group ${
-              isFront ? 'z-20' : 'z-10'
-            }`}
-            style={{
-              left: `${screenX}px`,
-              top: `${screenY}px`,
-              transform: `translate(-50%, -50%) scale(${scale})`,
-              opacity,
-              transition: isSelectedPhotoOpen && isPhotoClosing
-                ? 'opacity 180ms ease, transform 120ms ease-out'
-                : 'opacity 220ms ease, transform 120ms ease-out',
-              pointerEvents: photosReady && !isSelectedPhotoOpen ? 'auto' : 'none',
-            }}
-          >
+          return (
             <div
-              className={`w-[100px] sm:w-[122px] rounded-2xl border p-1.5 bg-gradient-to-b from-[#1a1d27]/95 via-[#10131b]/95 to-[#0a0c12]/95 shadow-[0_12px_30px_rgba(0,0,0,0.65)] ring-1 ring-inset ring-white/10 transition-all duration-300 ${
-                isHoveredByHand
-                  ? 'border-amber-200 shadow-[0_0_28px_rgba(251,191,36,0.75)] ring-amber-200/40'
-                  : 'border-amber-200/45 group-hover:border-amber-200 group-hover:shadow-[0_0_24px_rgba(251,191,36,0.55)]'
-              }`}
+              key={photo.id}
+              onClick={(event) => {
+                chimeAudio.playChime(1046.5, 0.15);
+                onSelectPhoto(
+                  photo,
+                  getPhotoOrigin(event.currentTarget, screenX, screenY, proj.z, activeScale, activeTilt)
+                );
+              }}
+              ref={(element) => {
+                if (element) photoCardElementsRef.current.set(photo.id, element);
+                else photoCardElementsRef.current.delete(photo.id);
+              }}
+              className={`absolute cursor-pointer group ${isHoveredByHand ? 'z-30' : 'z-20'}`}
+              style={{
+                left: `${screenX}px`,
+                top: `${screenY}px`,
+                transform: `translate3d(-50%, -50%, 0) rotateY(${activeYaw}deg) rotateZ(${activeTilt.toFixed(
+                  2
+                )}deg) scale(${activeScale.toFixed(3)})`,
+                opacity,
+                transition: 'opacity 260ms ease, transform 320ms cubic-bezier(0.22, 1, 0.36, 1)',
+                pointerEvents: photosReady && !isSelectedPhotoOpen ? 'auto' : 'none',
+                transformStyle: 'preserve-3d',
+              }}
             >
-              <div className="relative w-full aspect-[4/3] rounded-[10px] overflow-hidden border border-white/10 bg-black/80">
-                <img
-                  src={photo.url}
-                  alt={photo.title}
-                  className="w-full h-full object-cover"
-                />
+              {/* Smoked-Glass & Champagne Gold Polaroid Frame */}
+              <div
+                className={`relative w-[108px] sm:w-[132px] rounded-[16px] border p-2 pb-2.5 backdrop-blur-md transition-all duration-300 bg-gradient-to-b from-[#1a1d2a]/88 via-[#0f121b]/92 to-[#090b10]/96 ring-1 ring-inset ${
+                  isHoveredByHand
+                    ? 'border-amber-200 ring-amber-200/45 shadow-[0_18px_42px_rgba(0,0,0,0.75),0_0_32px_rgba(251,191,36,0.72)]'
+                    : 'border-amber-200/40 ring-white/10 shadow-[0_14px_34px_rgba(0,0,0,0.72),0_0_18px_rgba(251,191,36,0.16)] group-hover:border-amber-200/90 group-hover:shadow-[0_18px_40px_rgba(0,0,0,0.75),0_0_28px_rgba(251,191,36,0.55)]'
+                }`}
+              >
+                {/* Top specular champagne reflection */}
+                <div className="pointer-events-none absolute inset-x-4 top-0 h-px bg-gradient-to-r from-transparent via-amber-200/75 to-transparent" />
+
+                {/* Polaroid Photo Window */}
+                <div className="relative w-full aspect-[4/3] rounded-[10px] overflow-hidden border border-amber-100/20 bg-black/85 shadow-inner">
+                  <img
+                    src={photo.url}
+                    alt={photo.title}
+                    className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                    draggable={false}
+                  />
+                  {/* Subtle glass diagonal sheen */}
+                  <div className="pointer-events-none absolute inset-0 bg-gradient-to-tr from-transparent via-white/[0.04] to-amber-100/[0.12]" />
+
+                  {/* Magnetic Hand Hover Prompt Badge */}
+                  <div
+                    className={`pointer-events-none absolute bottom-1.5 right-1.5 rounded-full border border-amber-200/70 bg-black/75 px-2 py-0.5 text-[9px] font-semibold tracking-wide text-amber-100 shadow-md backdrop-blur-sm transition-all duration-200 ${
+                      isHoveredByHand ? 'opacity-100 scale-100' : 'opacity-0 scale-90'
+                    }`}
+                  >
+                    🤏 Apri
+                  </div>
+                </div>
+
+                {/* Classic Polaroid Bottom Chin with Romantic Serif Title */}
+                <div className="mt-2 flex items-center justify-center gap-1 px-0.5">
+                  <span className="text-[8px] text-amber-300/75">✦</span>
+                  <p
+                    className="truncate text-center text-[10.5px] italic tracking-wide text-amber-50/90"
+                    style={{ fontFamily: '"Playfair Display", Georgia, serif' }}
+                  >
+                    {photo.title || 'Ricordo'}
+                  </p>
+                  <span className="text-[8px] text-amber-300/75">✦</span>
+                </div>
               </div>
-              {photo.title && (
-                <p className="mt-1 truncate px-0.5 text-center text-[10px] font-medium tracking-wide text-amber-100/80">
-                  {photo.title}
-                </p>
-              )}
             </div>
-          </div>
-        );
-      })}
+          );
+        })}
     </div>
   );
 });
